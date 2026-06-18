@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRegisterPageChatContext } from '@/lib/page-chat-context'
-import { assets, assetGroups, currencies as currenciesApi } from '@/lib/api'
+import { assets, assetGroups, currencies as currenciesApi, info } from '@/lib/api'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -255,6 +255,20 @@ export default function AssetsPage() {
   // "Add asset" and "Add transaction" stay consistent.
   const [formUnitPrice, setFormUnitPrice] = useState('')
   const [quoteLoading, setQuoteLoading] = useState(false)
+  const [formTesouroKey, setFormTesouroKey] = useState('')
+
+  const { data: appInfo } = useQuery({
+    queryKey: ['info'],
+    queryFn: () => info.get(),
+    staleTime: Infinity,
+  })
+  const tesouroEnabled = !!appInfo?.features?.tesouro_direto
+  const { data: tesouroBonds } = useQuery({
+    queryKey: ['assets', 'market', 'tesouro-direto'],
+    queryFn: () => assets.marketSearch('tesouro direto', 30),
+    enabled: tesouroEnabled,
+    staleTime: 24 * 60 * 60 * 1000,
+  })
 
   const { data: rawAssetsList, isLoading } = useQuery({
     queryKey: ['assets'],
@@ -570,6 +584,21 @@ export default function AssetsPage() {
     setTickerSearchLoading(false)
   }
 
+  function resetTesouroForm() {
+    setFormTesouroKey('')
+  }
+
+  function pickTesouroBond(symbol: string) {
+    setFormTesouroKey(symbol)
+    const bond = (tesouroBonds ?? []).find((item) => item.symbol === symbol)
+    if (!bond) return
+    setFormMethod('market_price')
+    setFormCurrency('BRL')
+    setFormType('investment')
+    void pickTickerMatch(bond)
+  }
+
+
   function openCreate() {
     setEditingAsset(null)
     setFormName('')
@@ -587,6 +616,7 @@ export default function AssetsPage() {
     setFormGrowthFrequency('monthly')
     setFormGrowthStartDate('')
     resetMarketPriceForm()
+    resetTesouroForm()
     setDialogOpen(true)
   }
 
@@ -607,8 +637,10 @@ export default function AssetsPage() {
     setFormGrowthFrequency(asset.growth_frequency ?? 'monthly')
     setFormGrowthStartDate(asset.growth_start_date ?? '')
     resetMarketPriceForm()
+    resetTesouroForm()
     if (asset.valuation_method === 'market_price' && asset.ticker) {
       setFormTickerQuery(asset.ticker)
+      if (asset.ticker.startsWith('TD:')) setFormTesouroKey(asset.ticker)
       setFormUnits(asset.units?.toString() ?? '')
       // Synthesize a quote from the cached fields so the preview shows
       // immediately — we skip a round-trip to yfinance on edit open.
@@ -660,6 +692,7 @@ export default function AssetsPage() {
         payload.unit_price = formUnitPrice ? parseFloat(formUnitPrice) : null
       }
     }
+
 
     if (!editingAsset && formCurrentValue) {
       payload.current_value = parseFloat(formCurrentValue)
@@ -1195,7 +1228,7 @@ export default function AssetsPage() {
             {/* Valuation Method — locked on edit */}
             <div className="space-y-2">
               <Label>{t('assets.valuationMethod')}</Label>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid gap-2 grid-cols-3">
                 {VALUATION_METHODS.map(m => (
                   <button
                     key={m}
@@ -1267,6 +1300,25 @@ export default function AssetsPage() {
                     )}
                   </div>
                 </div>
+
+                {tesouroEnabled && !editingAsset && (tesouroBonds?.length ?? 0) > 0 && (
+                  <div className="space-y-2">
+                    <Label>{t('assets.tesouroBond')}</Label>
+                    <select
+                      className="bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary px-3 py-2 rounded-lg text-foreground text-sm w-full disabled:opacity-60"
+                      value={formTesouroKey}
+                      onChange={(e) => pickTesouroBond(e.target.value)}
+                    >
+                      <option value="">{t('assets.tesouroBondPlaceholder')}</option>
+                      {(tesouroBonds ?? []).map((bond) => (
+                        <option key={bond.symbol} value={bond.symbol}>
+                          {bond.name} · {bond.exchange}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-xs text-muted-foreground">{t('assets.tesouroHint')}</p>
+                  </div>
+                )}
 
                 {selectedQuote && (
                   <div className="rounded-lg border border-border bg-card p-3 text-sm">
@@ -1372,6 +1424,7 @@ export default function AssetsPage() {
                 )}
               </div>
             )}
+
 
             {/* Growth Rule Settings */}
             {formMethod === 'growth_rule' && (

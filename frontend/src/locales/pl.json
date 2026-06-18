@@ -1107,7 +1107,13 @@
     "total": "Łącznie",
     "confirmRegenerateTitle": "Przeliczyć wartości ponownie?",
     "confirmRegenerate": "Zmieniono parametry wzrostu. Wszystkie automatycznie wygenerowane wartości zostaną usunięte i przeliczone ponownie. Wartości ręczne zostaną zachowane.",
-    "regenerate": "Przelicz ponownie"
+    "regenerate": "Przelicz ponownie",
+    "tesouroDireto": "Tesouro Direto",
+    "tesouroBond": "Tesouro bond",
+    "tesouroBondPlaceholder": "Select a bond series",
+    "maturityDate": "Maturity date",
+    "tesouroCurrentValue": "Current official value",
+    "tesouroHint": "Uses the official Treasury PU Base price; refreshed daily when enabled."
   },
   "reports": {
     "section": "Analityka",

@@ -542,6 +542,7 @@ export interface Asset {
   connection_id: string | null
   isin: string | null
   maturity_date: string | null
+  tesouro_title_type: string | null
   group_id: string | null
   ticker: string | null
   ticker_exchange: string | null

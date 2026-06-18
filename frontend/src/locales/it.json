@@ -1038,7 +1038,13 @@
     "total": "Totale",
     "confirmRegenerateTitle": "Rigenerare i valori?",
     "confirmRegenerate": "I parametri di crescita sono cambiati. Tutti i valori generati automaticamente saranno eliminati e ricalcolati. I valori manuali saranno mantenuti.",
-    "regenerate": "Rigenera"
+    "regenerate": "Rigenera",
+    "tesouroDireto": "Tesouro Direto",
+    "tesouroBond": "Tesouro bond",
+    "tesouroBondPlaceholder": "Select a bond series",
+    "maturityDate": "Maturity date",
+    "tesouroCurrentValue": "Current official value",
+    "tesouroHint": "Uses the official Treasury PU Base price; refreshed daily when enabled."
   },
   "reports": {
     "section": "Analisi",

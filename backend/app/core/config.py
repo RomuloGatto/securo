@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     # is what Google's favicon service caps at before upscaling.
     logo_size: int = 128
 
+    # Brazilian Treasury bond prices (official Tesouro Transparente CSV).
+    # Opt-in so non-Brazilian installs pay zero network/UX cost.
+    tesouro_direto_enabled: bool = False
+
     model_config = SettingsConfigDict(env_file=".env")
 
 

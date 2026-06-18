@@ -435,6 +435,104 @@ class _UnreachableException(Exception):
     """Placeholder used when yfinance doesn't expose its rate-limit exception."""
 
 
+
+class CompositeMarketPriceProvider(MarketPriceProvider):
+    """Market-price provider that routes provider-specific symbols.
+
+    Yahoo remains the default for ordinary tickers. Tesouro Direto bonds are
+    exposed as compact TD:* symbols so they reuse the same market_price asset
+    ledger, creation, refresh, and UI flows.
+    """
+
+    name = "composite"
+
+    def __init__(self, default_provider: Optional[MarketPriceProvider] = None) -> None:
+        self.default_provider = default_provider or YFinanceProvider()
+
+    async def search(self, query: str, limit: int = 20) -> list[MarketSymbolMatch]:
+        q = (query or "").strip()
+        matches: list[MarketSymbolMatch] = []
+        if _tesouro_enabled() and _looks_like_tesouro_query(q):
+            matches.extend(await self._search_tesouro(limit=limit))
+        if len(matches) < limit:
+            matches.extend(await self.default_provider.search(q, limit=limit - len(matches)))
+        return matches[:limit]
+
+    async def get_quote(self, symbol: str) -> Optional[MarketSymbolQuote]:
+        if _is_tesouro_symbol(symbol):
+            return await self._tesouro_quote(symbol)
+        return await self.default_provider.get_quote(symbol)
+
+    async def get_latest_prices(self, symbols: list[str]) -> dict[str, Optional[Decimal]]:
+        out: dict[str, Optional[Decimal]] = {}
+        regular: list[str] = []
+        tesouro: list[str] = []
+        for symbol in symbols:
+            if _is_tesouro_symbol(symbol):
+                tesouro.append(symbol)
+            else:
+                regular.append(symbol)
+        if regular:
+            out.update(await self.default_provider.get_latest_prices(regular))
+        if tesouro:
+            out.update(await self._tesouro_latest_prices(tesouro))
+        return out
+
+    async def _search_tesouro(self, limit: int) -> list[MarketSymbolMatch]:
+        from app.providers.tesouro_direto import get_tesouro_direto_provider, tesouro_symbol_for
+
+        quotes = await get_tesouro_direto_provider().get_available_bonds()
+        return [
+            MarketSymbolMatch(
+                symbol=tesouro_symbol_for(q.title_type, q.maturity_date),
+                name=f"{q.title_type} · {q.maturity_date.strftime('%d/%m/%Y')}",
+                exchange="Tesouro Direto",
+                quote_type="BOND",
+            )
+            for q in quotes[:limit]
+        ]
+
+    async def _tesouro_quote(self, symbol: str) -> Optional[MarketSymbolQuote]:
+        from app.providers.tesouro_direto import get_tesouro_direto_provider, tesouro_symbol_for
+
+        quote = await get_tesouro_direto_provider().get_quote_by_symbol(symbol)
+        if quote is None:
+            return None
+        return MarketSymbolQuote(
+            symbol=tesouro_symbol_for(quote.title_type, quote.maturity_date),
+            name=f"{quote.title_type} {quote.maturity_date.year}",
+            exchange="Tesouro Direto",
+            currency="BRL",
+            price=float(quote.pu_base),
+            quote_type="BOND",
+        )
+
+    async def _tesouro_latest_prices(self, symbols: list[str]) -> dict[str, Optional[Decimal]]:
+        from app.providers.tesouro_direto import get_tesouro_direto_provider
+
+        quotes = await get_tesouro_direto_provider().get_quotes_by_symbol(symbols)
+        return {symbol.upper(): (q.pu_base if q else None) for symbol, q in quotes.items()}
+
+def _tesouro_enabled() -> bool:
+    try:
+        from app.core.config import get_settings
+
+        return bool(get_settings().tesouro_direto_enabled)
+    except Exception:
+        return False
+
+def _looks_like_tesouro_query(query: str) -> bool:
+    normalized = query.strip().casefold()
+    return normalized.startswith("td") or "tesouro" in normalized
+
+def _is_tesouro_symbol(symbol: str | None) -> bool:
+    try:
+        from app.providers.tesouro_direto import is_tesouro_symbol
+
+        return is_tesouro_symbol(symbol)
+    except Exception:
+        return False
+
 # Module-level singleton — cheap to construct, stateless beyond the yfinance
 # import, and consumers need a stable instance for dependency overrides.
 _default_provider: Optional[MarketPriceProvider] = None
@@ -444,7 +542,7 @@ def get_market_price_provider() -> MarketPriceProvider:
     """Return the configured market-price provider (yfinance by default)."""
     global _default_provider
     if _default_provider is None:
-        _default_provider = YFinanceProvider()
+        _default_provider = CompositeMarketPriceProvider()
     return _default_provider
 
 
