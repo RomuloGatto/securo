@@ -852,7 +852,7 @@ async def import_rules(
         ))
 
     overwritten = 0
-    if overwrite and existing:
+    if overwrite and existing and rules_to_create:
         overwritten = len(existing)
         await session.execute(delete(Rule).where(Rule.workspace_id == workspace_id))
 
