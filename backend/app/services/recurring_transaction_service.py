@@ -13,6 +13,8 @@ from app.models.transaction import Transaction
 from app.schemas.recurring_transaction import RecurringTransactionCreate, RecurringTransactionUpdate
 from app.services.credit_card_service import apply_effective_date
 from app.services.fx_rate_service import stamp_primary_amount
+from app.services import admin_service
+from app.core.timezone import app_today
 
 
 async def _verify_account_in_workspace(
@@ -191,7 +193,8 @@ async def generate_pending(
     If up_to is None, defaults to today. This allows the dashboard to pre-generate
     transactions for future months when the user navigates ahead.
     Returns the count of transactions generated."""
-    cutoff = up_to or date.today()
+    timezone_name = await admin_service.get_app_timezone(session)
+    cutoff = up_to or app_today(timezone_name)
 
     result = await session.execute(
         select(RecurringTransaction)
