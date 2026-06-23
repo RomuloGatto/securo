@@ -3,7 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRegisterPageChatContext } from '@/lib/page-chat-context'
-import { assets, assetGroups, currencies as currenciesApi, info } from '@/lib/api'
+import { assets, assetGroups, currencies as currenciesApi } from '@/lib/api'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -255,16 +255,6 @@ export default function AssetsPage() {
   // "Add asset" and "Add transaction" stay consistent.
   const [formUnitPrice, setFormUnitPrice] = useState('')
   const [quoteLoading, setQuoteLoading] = useState(false)
-
-  const { data: appInfo } = useQuery({
-    queryKey: ['info'],
-    queryFn: () => info.get(),
-    staleTime: Infinity,
-  })
-  // Tesouro Direto bonds are served through the same market search as tickers,
-  // so there's no separate dropdown — the flag only toggles the search hint.
-  // Cache warming is handled server-side (gated to Brazilian instances).
-  const tesouroEnabled = !!appInfo?.features?.tesouro_direto
 
   const { data: rawAssetsList, isLoading } = useQuery({
     queryKey: ['assets'],
@@ -1283,9 +1273,6 @@ export default function AssetsPage() {
                       </span>
                     )}
                   </div>
-                  {tesouroEnabled && !editingAsset && (
-                    <p className="text-xs text-muted-foreground">{t('assets.tickerTesouroHint')}</p>
-                  )}
                 </div>
 
                 {selectedQuote && (
