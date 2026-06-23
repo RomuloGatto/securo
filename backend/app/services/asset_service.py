@@ -158,7 +158,6 @@ def _asset_to_read(
         connection_id=asset.connection_id,
         isin=asset.isin,
         maturity_date=asset.maturity_date,
-        tesouro_title_type=(asset.external_metadata or {}).get("tesouro_title_type"),
         group_id=asset.group_id,
         ticker=asset.ticker,
         ticker_exchange=asset.ticker_exchange,
@@ -464,7 +463,6 @@ async def create_asset(
         growth_frequency=data.growth_frequency,
         growth_start_date=data.growth_start_date,
         maturity_date=data.maturity_date,
-        external_metadata=None,
         is_archived=data.is_archived,
         position=data.position,
         group_id=data.group_id,
@@ -601,7 +599,6 @@ async def update_asset(
     update_data = data.model_dump(exclude_unset=True)
     # Prevent changing valuation_method on existing assets
     update_data.pop("valuation_method", None)
-    update_data.pop("tesouro_title_type", None)
     for key, value in update_data.items():
         setattr(asset, key, value)
 

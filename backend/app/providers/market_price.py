@@ -451,12 +451,14 @@ class CompositeMarketPriceProvider(MarketPriceProvider):
 
     async def search(self, query: str, limit: int = 20) -> list[MarketSymbolMatch]:
         q = (query or "").strip()
-        matches: list[MarketSymbolMatch] = []
+        # A Tesouro search wants bonds, not Yahoo's "tesouro" text matches — so
+        # when we have bond results, return them alone. Fall through to Yahoo
+        # only when Tesouro is off or has nothing (e.g. flag disabled).
         if _tesouro_enabled() and _looks_like_tesouro_query(q):
-            matches.extend(await self._search_tesouro(limit=limit))
-        if len(matches) < limit:
-            matches.extend(await self.default_provider.search(q, limit=limit - len(matches)))
-        return matches[:limit]
+            tesouro = await self._search_tesouro(q, limit=limit)
+            if tesouro:
+                return tesouro[:limit]
+        return await self.default_provider.search(q, limit=limit)
 
     async def get_quote(self, symbol: str) -> Optional[MarketSymbolQuote]:
         if _is_tesouro_symbol(symbol):
@@ -478,10 +480,24 @@ class CompositeMarketPriceProvider(MarketPriceProvider):
             out.update(await self._tesouro_latest_prices(tesouro))
         return out
 
-    async def _search_tesouro(self, limit: int) -> list[MarketSymbolMatch]:
-        from app.providers.tesouro_direto import get_tesouro_direto_provider, tesouro_symbol_for
+    async def _search_tesouro(self, query: str, limit: int) -> list[MarketSymbolMatch]:
+        from app.providers.tesouro_direto import (
+            _normalize,
+            get_tesouro_direto_provider,
+            tesouro_symbol_for,
+        )
 
         quotes = await get_tesouro_direto_provider().get_available_bonds()
+        # Filter by name so the shared search box behaves like ticker search:
+        # "selic" → Selic bonds, "ipca 2035" → that maturity. "tesouro"/"direto"
+        # are dropped as filler so a bare "tesouro" lists everything.
+        tokens = [t for t in _normalize(query).split() if t and t not in ("tesouro", "direto")]
+        if tokens:
+            quotes = [
+                q
+                for q in quotes
+                if all(tok in _normalize(f"{q.title_type} {q.maturity_date.year}") for tok in tokens)
+            ]
         return [
             MarketSymbolMatch(
                 symbol=tesouro_symbol_for(q.title_type, q.maturity_date),
@@ -521,9 +537,16 @@ def _tesouro_enabled() -> bool:
     except Exception:
         return False
 
+# Bond-name keywords that route the shared search to Tesouro Direto. A bare
+# "td" prefix is deliberately excluded — it collides with real tickers like TD
+# (Toronto-Dominion Bank). Stock/crypto queries skip the bond path entirely so
+# they never wait on the Treasury CSV.
+_TESOURO_KEYWORDS = ("tesouro", "selic", "ipca", "prefixado", "igpm", "educa", "renda")
+
+
 def _looks_like_tesouro_query(query: str) -> bool:
     normalized = query.strip().casefold()
-    return normalized.startswith("td") or "tesouro" in normalized
+    return any(keyword in normalized for keyword in _TESOURO_KEYWORDS)
 
 def _is_tesouro_symbol(symbol: str | None) -> bool:
     try:

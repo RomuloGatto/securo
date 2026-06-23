@@ -255,20 +255,16 @@ export default function AssetsPage() {
   // "Add asset" and "Add transaction" stay consistent.
   const [formUnitPrice, setFormUnitPrice] = useState('')
   const [quoteLoading, setQuoteLoading] = useState(false)
-  const [formTesouroKey, setFormTesouroKey] = useState('')
 
   const { data: appInfo } = useQuery({
     queryKey: ['info'],
     queryFn: () => info.get(),
     staleTime: Infinity,
   })
+  // Tesouro Direto bonds are served through the same market search as tickers,
+  // so there's no separate dropdown. We just keep the flag to tweak the search
+  // hint and warm the Treasury CSV cache when the dialog opens.
   const tesouroEnabled = !!appInfo?.features?.tesouro_direto
-  const { data: tesouroBonds } = useQuery({
-    queryKey: ['assets', 'market', 'tesouro-direto'],
-    queryFn: () => assets.marketSearch('tesouro direto', 30),
-    enabled: tesouroEnabled,
-    staleTime: 24 * 60 * 60 * 1000,
-  })
 
   const { data: rawAssetsList, isLoading } = useQuery({
     queryKey: ['assets'],
@@ -584,20 +580,6 @@ export default function AssetsPage() {
     setTickerSearchLoading(false)
   }
 
-  function resetTesouroForm() {
-    setFormTesouroKey('')
-  }
-
-  function pickTesouroBond(symbol: string) {
-    setFormTesouroKey(symbol)
-    const bond = (tesouroBonds ?? []).find((item) => item.symbol === symbol)
-    if (!bond) return
-    setFormMethod('market_price')
-    setFormCurrency('BRL')
-    setFormType('investment')
-    void pickTickerMatch(bond)
-  }
-
 
   function openCreate() {
     setEditingAsset(null)
@@ -616,7 +598,10 @@ export default function AssetsPage() {
     setFormGrowthFrequency('monthly')
     setFormGrowthStartDate('')
     resetMarketPriceForm()
-    resetTesouroForm()
+    // Warm the Treasury CSV cache in the background so the first bond search
+    // in the shared ticker box returns instantly instead of waiting on the
+    // cold ~25s download. Fire-and-forget; ignore failures.
+    if (tesouroEnabled) void assets.marketSearch('tesouro', 1).catch(() => {})
     setDialogOpen(true)
   }
 
@@ -637,10 +622,8 @@ export default function AssetsPage() {
     setFormGrowthFrequency(asset.growth_frequency ?? 'monthly')
     setFormGrowthStartDate(asset.growth_start_date ?? '')
     resetMarketPriceForm()
-    resetTesouroForm()
     if (asset.valuation_method === 'market_price' && asset.ticker) {
       setFormTickerQuery(asset.ticker)
-      if (asset.ticker.startsWith('TD:')) setFormTesouroKey(asset.ticker)
       setFormUnits(asset.units?.toString() ?? '')
       // Synthesize a quote from the cached fields so the preview shows
       // immediately — we skip a round-trip to yfinance on edit open.
@@ -771,7 +754,7 @@ export default function AssetsPage() {
             <AssetIcon logoUrl={asset.logo_url} Icon={Icon} colorClass={config.color} bgClass={config.bg} size={16} tile="w-8 h-8" />
             <div className="min-w-0">
               <div className="flex items-center gap-1.5">
-                <span className="font-semibold text-foreground truncate">{asset.ticker || asset.name}</span>
+                <span className="font-semibold text-foreground truncate">{asset.ticker && !asset.ticker.startsWith('TD:') ? asset.ticker : asset.name}</span>
                 {needsBuys && (
                   <Badge
                     variant="outline"
@@ -789,7 +772,7 @@ export default function AssetsPage() {
                   <Badge variant="outline" className="text-[9px] px-1 py-0 text-sky-600 border-sky-200">{t('assets.synced')}</Badge>
                 )}
               </div>
-              <span className="text-[11px] text-muted-foreground truncate block">{asset.ticker ? asset.name : t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`)}</span>
+              <span className="text-[11px] text-muted-foreground truncate block">{asset.ticker && !asset.ticker.startsWith('TD:') ? asset.name : (asset.ticker?.startsWith('TD:') ? 'Tesouro Direto' : t(`assets.type${asset.type.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()).replace(/^./, c => c.toUpperCase())}`))}</span>
             </div>
           </div>
           {/* Quant. */}
@@ -1273,7 +1256,11 @@ export default function AssetsPage() {
                     />
                     {tickerMatches.length > 0 && !editingAsset && (
                       <div className="absolute z-20 mt-1 w-full max-h-60 overflow-y-auto rounded-lg border border-border bg-popover shadow-lg">
-                        {tickerMatches.map(match => (
+                        {tickerMatches.map(match => {
+                          // Tesouro bonds carry an internal TD:* symbol — show
+                          // the readable name instead of the hash for those.
+                          const isBond = match.symbol.startsWith('TD:')
+                          return (
                           <button
                             key={`${match.symbol}-${match.exchange ?? ''}`}
                             type="button"
@@ -1281,16 +1268,17 @@ export default function AssetsPage() {
                             className="flex flex-col w-full text-left px-3 py-2 hover:bg-muted transition-colors"
                           >
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-semibold text-sm">{match.symbol}</span>
+                              <span className="font-semibold text-sm truncate">{isBond ? (match.name ?? match.symbol) : match.symbol}</span>
                               {match.exchange && (
-                                <span className="text-xs text-muted-foreground">{match.exchange}</span>
+                                <span className="text-xs text-muted-foreground shrink-0">{match.exchange}</span>
                               )}
                             </div>
-                            {match.name && (
+                            {match.name && !isBond && (
                               <span className="text-xs text-muted-foreground truncate">{match.name}</span>
                             )}
                           </button>
-                        ))}
+                          )
+                        })}
                       </div>
                     )}
                     {tickerSearchLoading && (
@@ -1299,33 +1287,17 @@ export default function AssetsPage() {
                       </span>
                     )}
                   </div>
+                  {tesouroEnabled && !editingAsset && (
+                    <p className="text-xs text-muted-foreground">{t('assets.tickerTesouroHint')}</p>
+                  )}
                 </div>
-
-                {tesouroEnabled && !editingAsset && (tesouroBonds?.length ?? 0) > 0 && (
-                  <div className="space-y-2">
-                    <Label>{t('assets.tesouroBond')}</Label>
-                    <select
-                      className="bg-card border border-border focus:outline-none focus:ring-2 focus:ring-primary px-3 py-2 rounded-lg text-foreground text-sm w-full disabled:opacity-60"
-                      value={formTesouroKey}
-                      onChange={(e) => pickTesouroBond(e.target.value)}
-                    >
-                      <option value="">{t('assets.tesouroBondPlaceholder')}</option>
-                      {(tesouroBonds ?? []).map((bond) => (
-                        <option key={bond.symbol} value={bond.symbol}>
-                          {bond.name} · {bond.exchange}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-xs text-muted-foreground">{t('assets.tesouroHint')}</p>
-                  </div>
-                )}
 
                 {selectedQuote && (
                   <div className="rounded-lg border border-border bg-card p-3 text-sm">
                     <div className="flex items-center justify-between">
                       <div className="flex flex-col min-w-0">
-                        <span className="font-semibold">{selectedQuote.symbol}</span>
-                        {selectedQuote.name && (
+                        <span className="font-semibold truncate">{selectedQuote.symbol.startsWith('TD:') ? (selectedQuote.name ?? selectedQuote.symbol) : selectedQuote.symbol}</span>
+                        {selectedQuote.name && !selectedQuote.symbol.startsWith('TD:') && (
                           <span className="text-xs text-muted-foreground truncate">{selectedQuote.name}</span>
                         )}
                         {/* Staleness hint — only meaningful when editing an

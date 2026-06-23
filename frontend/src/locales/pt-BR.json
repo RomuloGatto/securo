@@ -963,7 +963,8 @@
     "growthRule": "Regra de Crescimento",
     "marketPrice": "Preço de Mercado",
     "ticker": "Código",
-    "tickerPlaceholder": "ex. AAPL, BTC-USD, PETR4.SA",
+    "tickerPlaceholder": "ex. AAPL, PETR4.SA, Tesouro Selic",
+    "tickerTesouroHint": "Busque ações, cripto, ETFs ou títulos do Tesouro Direto pelo nome.",
     "quantity": "Quantidade",
     "marketPriceSource": "Cotação",
     "marketPriceSourceTooltip": "Preço atualizado automaticamente via dados de mercado",
@@ -1038,13 +1039,7 @@
     "total": "Total",
     "confirmRegenerateTitle": "Regenerar valores?",
     "confirmRegenerate": "Os parâmetros de crescimento foram alterados. Todos os valores gerados automaticamente serão excluídos e recalculados. Valores manuais serão mantidos.",
-    "regenerate": "Regenerar",
-    "tesouroDireto": "Tesouro Direto",
-    "tesouroBond": "Tesouro bond",
-    "tesouroBondPlaceholder": "Select a bond series",
-    "maturityDate": "Maturity date",
-    "tesouroCurrentValue": "Current official value",
-    "tesouroHint": "Uses the official Treasury PU Base price; refreshed daily when enabled."
+    "regenerate": "Regenerar"
   },
   "reports": {
     "section": "Análises",

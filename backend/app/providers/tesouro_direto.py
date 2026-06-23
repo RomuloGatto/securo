@@ -5,6 +5,7 @@ import csv
 import hashlib
 import io
 import re
+import time
 import unicodedata
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -19,6 +20,14 @@ TESOURO_DIRETO_CSV_URL = (
 )
 
 TESOURO_SYMBOL_PREFIX = "TD"
+
+# The official CSV carries years of daily history for every bond, so a fresh
+# download + parse takes ~25s. Prices only change once per business day, so we
+# cache the latest-per-bond snapshot in-process for several hours — long enough
+# that as-you-type search stays warm through a session. Shared across provider
+# instances since get_tesouro_direto_provider() returns a fresh one each call.
+_CACHE_TTL_SECONDS = 6 * 60 * 60
+_latest_cache: dict = {"ts": 0.0, "quotes": None}
 
 def tesouro_symbol_for(title_type: str, maturity_date: date) -> str:
     """Return a compact market-price symbol for a Tesouro Direto bond.
@@ -96,24 +105,70 @@ class TesouroDiretoProvider:
         self.url = url
 
     async def get_latest_price(self, title_type: str, maturity_date: date) -> Optional[TesouroDiretoQuote]:
-        return self.find_price(title_type, maturity_date, csv_text=await self._load_csv())
+        target = (_normalize(title_type), maturity_date)
+        for quote in await self._latest_quotes():
+            if (_normalize(quote.title_type), quote.maturity_date) == target:
+                return quote
+        return None
 
     async def get_latest_prices(
         self, keys: list[tuple[str, date]]
     ) -> dict[tuple[str, date], Optional[TesouroDiretoQuote]]:
-        csv_text = await self._load_csv()
-        return {key: self.find_price(key[0], key[1], csv_text=csv_text) for key in keys}
+        wanted = {(_normalize(t), m): (t, m) for t, m in keys}
+        out: dict[tuple[str, date], Optional[TesouroDiretoQuote]] = {key: None for key in keys}
+        for quote in await self._latest_quotes():
+            original = wanted.get((_normalize(quote.title_type), quote.maturity_date))
+            if original is not None:
+                out[original] = quote
+        return out
 
     async def get_available_bonds(self) -> list[TesouroDiretoQuote]:
-        return self.list_latest_quotes(csv_text=await self._load_csv())
+        # Only bonds still open for investment — the CSV also lists long-matured
+        # series that nobody should be adding as a current holding.
+        today = date.today()
+        bonds = [q for q in await self._latest_quotes() if q.maturity_date >= today]
+        return sorted(bonds, key=lambda q: (q.title_type, q.maturity_date))
 
     async def get_quote_by_symbol(self, symbol: str) -> Optional[TesouroDiretoQuote]:
-        csv_text = await self._load_csv()
-        return self.find_price_by_symbol(symbol, csv_text=csv_text)
+        try:
+            title_hash, maturity_date = parse_tesouro_symbol(symbol)
+        except ValueError:
+            return None
+        for quote in await self._latest_quotes():
+            if quote.maturity_date != maturity_date:
+                continue
+            if tesouro_symbol_for(quote.title_type, quote.maturity_date).split(":")[1] == title_hash:
+                return quote
+        return None
 
     async def get_quotes_by_symbol(self, symbols: list[str]) -> dict[str, Optional[TesouroDiretoQuote]]:
-        csv_text = await self._load_csv()
-        return {symbol.upper(): self.find_price_by_symbol(symbol, csv_text=csv_text) for symbol in symbols}
+        return {symbol.upper(): await self.get_quote_by_symbol(symbol) for symbol in symbols}
+
+    async def _latest_quotes(self) -> list[TesouroDiretoQuote]:
+        """Latest (most recent Data Base) quote per (title, maturity).
+
+        Cached in-process for ``_CACHE_TTL_SECONDS`` to avoid re-downloading and
+        re-parsing the full historical CSV on every quote/search/refresh.
+        """
+        if self._csv_text is not None:
+            return self._build_latest(self._csv_text)
+        now = time.monotonic()
+        cached = _latest_cache["quotes"]
+        if cached is not None and (now - _latest_cache["ts"]) < _CACHE_TTL_SECONDS:
+            return cached
+        csv_text = await asyncio.to_thread(self._download_csv)
+        quotes = self._build_latest(csv_text)
+        _latest_cache["quotes"] = quotes
+        _latest_cache["ts"] = now
+        return quotes
+
+    def _build_latest(self, csv_text: str) -> list[TesouroDiretoQuote]:
+        latest: dict[tuple[str, date], TesouroDiretoQuote] = {}
+        for quote in self._iter_quotes(csv_text):
+            key = (_normalize(quote.title_type), quote.maturity_date)
+            if key not in latest or quote.price_date > latest[key].price_date:
+                latest[key] = quote
+        return list(latest.values())
 
     def find_price(
         self,
@@ -158,11 +213,6 @@ class TesouroDiretoProvider:
             if key not in latest or quote.price_date > latest[key].price_date:
                 latest[key] = quote
         return sorted(latest.values(), key=lambda q: (q.title_type, q.maturity_date))
-
-    async def _load_csv(self) -> str:
-        if self._csv_text is not None:
-            return self._csv_text
-        return await asyncio.to_thread(self._download_csv)
 
     def _download_csv(self) -> str:
         response = requests.get(

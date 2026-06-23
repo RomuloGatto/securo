@@ -86,7 +86,6 @@ class AssetRead(BaseModel):
     connection_id: Optional[uuid.UUID] = None
     isin: Optional[str] = None
     maturity_date: Optional[date] = None
-    tesouro_title_type: Optional[str] = None
     group_id: Optional[uuid.UUID] = None
     ticker: Optional[str] = None
     ticker_exchange: Optional[str] = None

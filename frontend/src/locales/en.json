@@ -963,7 +963,8 @@
     "growthRule": "Growth Rule",
     "marketPrice": "Market Price",
     "ticker": "Ticker",
-    "tickerPlaceholder": "e.g. AAPL, BTC-USD, PETR4.SA",
+    "tickerPlaceholder": "e.g. AAPL, PETR4.SA, Tesouro Selic",
+    "tickerTesouroHint": "Search stocks, crypto, ETFs, or Tesouro Direto bonds by name.",
     "quantity": "Quantity",
     "marketPriceSource": "Live quote",
     "marketPriceSourceTooltip": "Price refreshed automatically from market data",
@@ -1038,13 +1039,7 @@
     "total": "Total",
     "confirmRegenerateTitle": "Regenerate values?",
     "confirmRegenerate": "Growth parameters changed. All automatically generated values will be deleted and recalculated. Manual values will be kept.",
-    "regenerate": "Regenerate",
-    "tesouroDireto": "Tesouro Direto",
-    "tesouroBond": "Tesouro bond",
-    "tesouroBondPlaceholder": "Select a bond series",
-    "maturityDate": "Maturity date",
-    "tesouroCurrentValue": "Current official value",
-    "tesouroHint": "Uses the official Treasury PU Base price; refreshed daily when enabled."
+    "regenerate": "Regenerate"
   },
   "reports": {
     "section": "Analytics",
