@@ -600,8 +600,11 @@ export default function AssetsPage() {
     resetMarketPriceForm()
     // Warm the Treasury CSV cache in the background so the first bond search
     // in the shared ticker box returns instantly instead of waiting on the
-    // cold ~25s download. Fire-and-forget; ignore failures.
-    if (tesouroEnabled) void assets.marketSearch('tesouro', 1).catch(() => {})
+    // cold ~25s download. Gated to Brazilian users (BRL display currency or
+    // pt locale) so the feature being on by default never makes a non-Brazilian
+    // install hit the Brazilian government endpoint. Fire-and-forget.
+    const isBrazilContext = userCurrency === 'BRL' || locale.toLowerCase().startsWith('pt')
+    if (tesouroEnabled && isBrazilContext) void assets.marketSearch('tesouro', 1).catch(() => {})
     setDialogOpen(true)
   }
 

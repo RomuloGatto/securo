@@ -108,8 +108,12 @@ class Settings(BaseSettings):
     logo_size: int = 128
 
     # Brazilian Treasury bond prices (official Tesouro Transparente CSV).
-    # Opt-in so non-Brazilian installs pay zero network/UX cost.
-    tesouro_direto_enabled: bool = False
+    # On by default since most users are Brazilian; the official CSV is only
+    # fetched when someone actually searches a bond, and the UI pre-warm is
+    # gated to Brazilian users, so non-Brazilian installs pay ~zero cost.
+    # Set TESOURO_DIRETO_ENABLED=false to fully disable (e.g. to avoid the
+    # external dependency on the Brazilian government endpoint).
+    tesouro_direto_enabled: bool = True
 
     model_config = SettingsConfigDict(env_file=".env")
 
