@@ -21,7 +21,7 @@ import {
   PopoverTrigger,
   PopoverContent,
 } from '@/components/ui/popover'
-import type { Goal } from '@/types'
+import type { Account, Asset, AssetGroup, Goal } from '@/types'
 import {
   Pencil, Trash2, Plus, Pause, Play, CheckCircle2, Archive, Target,
   ChevronDown,
@@ -45,6 +45,41 @@ const PRESET_COLORS = [
   '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
   '#8B5CF6', '#EC4899', '#06B6D4', '#F97316',
 ]
+
+const SELECT_CLASS = 'w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
+
+function LinkedResourceSelect<T extends { id: string }>({
+  name,
+  label,
+  placeholder,
+  defaultValue,
+  items,
+  renderOption,
+  hint,
+}: {
+  name: string
+  label: string
+  placeholder: string
+  defaultValue: string | null | undefined
+  items: T[] | undefined
+  renderOption: (item: T) => React.ReactNode
+  hint?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <Label>{label}</Label>
+      <select name={name} defaultValue={defaultValue ?? ''} className={SELECT_CLASS} required>
+        <option value="">{placeholder}</option>
+        {items?.map((item) => (
+          <option key={item.id} value={item.id}>
+            {renderOption(item)}
+          </option>
+        ))}
+      </select>
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
@@ -441,7 +476,7 @@ export default function GoalsPage() {
                 <select
                   name="currency"
                   defaultValue={editing?.currency ?? userCurrency}
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  className={SELECT_CLASS}
                 >
                   {supportedCurrencies?.map((c: { code: string; name: string; flag: string }) => (
                     <option key={c.code} value={c.code}>
@@ -467,7 +502,7 @@ export default function GoalsPage() {
                 name="tracking_type"
                 value={trackingType}
                 onChange={(e) => setTrackingType(e.target.value)}
-                className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                className={SELECT_CLASS}
               >
                 <option value="manual">{t('goals.trackingManual')}</option>
                 <option value="account">{t('goals.trackingAccount')}</option>
@@ -490,61 +525,37 @@ export default function GoalsPage() {
             )}
 
             {trackingType === 'account' && (
-              <div className="space-y-2">
-                <Label>{t('goals.account')}</Label>
-                <select
-                  name="account_id"
-                  defaultValue={editing?.account_id ?? ''}
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  required
-                >
-                  <option value="">{t('goals.selectAccount')}</option>
-                  {accountsList?.map((acc) => (
-                    <option key={acc.id} value={acc.id}>
-                      {getAccountName(acc)} ({acc.currency})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <LinkedResourceSelect<Account>
+                name="account_id"
+                label={t('goals.account')}
+                placeholder={t('goals.selectAccount')}
+                defaultValue={editing?.account_id}
+                items={accountsList}
+                renderOption={(acc) => `${getAccountName(acc)} (${acc.currency})`}
+              />
             )}
 
             {trackingType === 'asset' && (
-              <div className="space-y-2">
-                <Label>{t('goals.asset')}</Label>
-                <select
-                  name="asset_id"
-                  defaultValue={editing?.asset_id ?? ''}
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  required
-                >
-                  <option value="">{t('goals.selectAsset')}</option>
-                  {assetsList?.map((asset: { id: string; name: string; currency: string }) => (
-                    <option key={asset.id} value={asset.id}>
-                      {asset.name} ({asset.currency})
-                    </option>
-                  ))}
-                </select>
-              </div>
+              <LinkedResourceSelect<Asset>
+                name="asset_id"
+                label={t('goals.asset')}
+                placeholder={t('goals.selectAsset')}
+                defaultValue={editing?.asset_id}
+                items={assetsList}
+                renderOption={(asset) => `${asset.name} (${asset.currency})`}
+              />
             )}
 
             {trackingType === 'asset_group' && (
-              <div className="space-y-2">
-                <Label>{t('goals.wallet')}</Label>
-                <select
-                  name="asset_group_id"
-                  defaultValue={editing?.asset_group_id ?? ''}
-                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                  required
-                >
-                  <option value="">{t('goals.selectWallet')}</option>
-                  {walletsList?.map((wallet: { id: string; name: string; current_value_primary: number }) => (
-                    <option key={wallet.id} value={wallet.id}>
-                      {wallet.name}
-                    </option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">{t('goals.walletHint')}</p>
-              </div>
+              <LinkedResourceSelect<AssetGroup>
+                name="asset_group_id"
+                label={t('goals.wallet')}
+                placeholder={t('goals.selectWallet')}
+                defaultValue={editing?.asset_group_id}
+                items={walletsList}
+                renderOption={(wallet) => wallet.name}
+                hint={t('goals.walletHint')}
+              />
             )}
 
             {/* Icon & Color */}
