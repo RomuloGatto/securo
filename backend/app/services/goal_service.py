@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.account import Account
 from app.models.asset import Asset
+from app.models.asset_group import AssetGroup
 from app.models.goal import Goal
 from app.models.user import User
 from app.schemas.goal import GoalCreate, GoalRead, GoalSummary, GoalUpdate
@@ -60,6 +61,22 @@ async def _resolve_current_amount(
                     return converted
                 return bal
         return goal.current_amount
+    elif goal.tracking_type == "asset_group" and goal.asset_group_id:
+        group = await session.get(AssetGroup, goal.asset_group_id)
+        if group:
+            assets_by_currency, _ = await get_asset_values_at(
+                session, workspace_id, by_workspace=True, group_ids=[group.id]
+            )
+            total = Decimal("0")
+            for currency, amount in assets_by_currency.items():
+                native = Decimal(str(amount))
+                if currency == goal_currency:
+                    total += native
+                else:
+                    converted, _ = await convert(session, native, currency, goal_currency)
+                    total += converted
+            return total
+        return goal.current_amount
     elif goal.tracking_type == "net_worth":
         # Reuse dashboard's account query and balance logic so manual accounts
         # (whose balance is computed from transactions) are handled correctly.
@@ -86,6 +103,34 @@ async def _resolve_current_amount(
         return total
     else:
         return goal.current_amount
+
+
+async def _ensure_goal_link_scope(
+    session: AsyncSession, workspace_id: uuid.UUID, data: GoalCreate | GoalUpdate
+) -> None:
+    """Validate linked tracking targets stay inside the current workspace."""
+    if data.account_id:
+        account = await session.get(Account, data.account_id)
+        if not account or account.workspace_id != workspace_id:
+            raise ValueError("Linked account not found")
+    if data.asset_id:
+        asset = await session.get(Asset, data.asset_id)
+        if not asset or asset.workspace_id != workspace_id:
+            raise ValueError("Linked asset not found")
+    if data.asset_group_id:
+        group = await session.get(AssetGroup, data.asset_group_id)
+        if not group or group.workspace_id != workspace_id:
+            raise ValueError("Linked wallet not found")
+
+
+def _clear_inactive_tracking_links(goal: Goal) -> None:
+    """Keep only the link field used by the selected tracking type."""
+    if goal.tracking_type != "account":
+        goal.account_id = None
+    if goal.tracking_type != "asset":
+        goal.asset_id = None
+    if goal.tracking_type != "asset_group":
+        goal.asset_group_id = None
 
 
 def _compute_percentage(current: Decimal, target: Decimal) -> float:
@@ -164,7 +209,7 @@ async def _enrich_goal(
         current, goal.target_amount, goal.target_date, goal_start, goal.initial_amount
     )
 
-    # Get linked account/asset name
+    # Get linked account/asset/wallet name
     account_name = None
     if goal.account_id:
         account = await session.get(Account, goal.account_id)
@@ -175,6 +220,11 @@ async def _enrich_goal(
         asset = await session.get(Asset, goal.asset_id)
         if asset:
             asset_name = asset.name
+    asset_group_name = None
+    if goal.asset_group_id:
+        group = await session.get(AssetGroup, goal.asset_group_id)
+        if group:
+            asset_group_name = group.name
 
     # Convert to primary currency if needed
     primary_currency = await _get_primary_currency(session, user_id)
@@ -203,6 +253,7 @@ async def _enrich_goal(
         tracking_type=goal.tracking_type,
         account_id=goal.account_id,
         asset_id=goal.asset_id,
+        asset_group_id=goal.asset_group_id,
         status=goal.status,
         icon=goal.icon,
         color=goal.color,
@@ -215,6 +266,7 @@ async def _enrich_goal(
         on_track=on_track,
         account_name=account_name,
         asset_name=asset_name,
+        asset_group_name=asset_group_name,
     )
 
 
@@ -253,6 +305,7 @@ async def create_goal(
     user_id: uuid.UUID,
     data: GoalCreate,
 ) -> GoalRead:
+    await _ensure_goal_link_scope(session, workspace_id, data)
     goal = Goal(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -264,10 +317,12 @@ async def create_goal(
         tracking_type=data.tracking_type,
         account_id=data.account_id,
         asset_id=data.asset_id,
+        asset_group_id=data.asset_group_id,
         icon=data.icon,
         color=data.color,
         metadata_json=data.metadata_json,
     )
+    _clear_inactive_tracking_links(goal)
     # Capture the starting balance so on-track logic measures progress from baseline
     initial = await _resolve_current_amount(session, goal, user_id)
     goal.initial_amount = initial
@@ -290,8 +345,10 @@ async def update_goal(
     goal = result.scalar_one_or_none()
     if not goal:
         return None
+    await _ensure_goal_link_scope(session, workspace_id, data)
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(goal, field, value)
+    _clear_inactive_tracking_links(goal)
     await session.commit()
     await session.refresh(goal)
     return await _enrich_goal(session, goal, user_id)

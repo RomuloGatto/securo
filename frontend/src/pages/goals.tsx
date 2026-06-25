@@ -3,7 +3,7 @@ import { getAccountName } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { goals as goalsApi, accounts as accountsApi, assets as assetsApi, currencies as currenciesApi } from '@/lib/api'
+import { goals as goalsApi, accounts as accountsApi, assets as assetsApi, assetGroups as assetGroupsApi, currencies as currenciesApi } from '@/lib/api'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
@@ -131,6 +131,11 @@ export default function GoalsPage() {
   const { data: assetsList } = useQuery({
     queryKey: ['assets'],
     queryFn: () => assetsApi.list(),
+  })
+
+  const { data: walletsList } = useQuery({
+    queryKey: ['asset-groups'],
+    queryFn: assetGroupsApi.list,
   })
 
   const { data: supportedCurrencies } = useQuery({
@@ -302,6 +307,9 @@ export default function GoalsPage() {
                         {goal.asset_name && (
                           <span>{goal.asset_name}</span>
                         )}
+                        {goal.asset_group_name && (
+                          <span>{goal.asset_group_name}</span>
+                        )}
                       </div>
                     </div>
 
@@ -400,6 +408,9 @@ export default function GoalsPage() {
               if (tt === 'asset') {
                 payload.asset_id = (formData.get('asset_id') as string) || null
               }
+              if (tt === 'asset_group') {
+                payload.asset_group_id = (formData.get('asset_group_id') as string) || null
+              }
 
               if (editing) {
                 updateMutation.mutate({ id: editing.id, ...payload } as Partial<Goal> & { id: string })
@@ -461,6 +472,7 @@ export default function GoalsPage() {
                 <option value="manual">{t('goals.trackingManual')}</option>
                 <option value="account">{t('goals.trackingAccount')}</option>
                 <option value="asset">{t('goals.trackingAsset')}</option>
+                <option value="asset_group">{t('goals.trackingWallet')}</option>
                 <option value="net_worth">{t('goals.trackingNetWorth')}</option>
               </select>
             </div>
@@ -512,6 +524,26 @@ export default function GoalsPage() {
                     </option>
                   ))}
                 </select>
+              </div>
+            )}
+
+            {trackingType === 'asset_group' && (
+              <div className="space-y-2">
+                <Label>{t('goals.wallet')}</Label>
+                <select
+                  name="asset_group_id"
+                  defaultValue={editing?.asset_group_id ?? ''}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  required
+                >
+                  <option value="">{t('goals.selectWallet')}</option>
+                  {walletsList?.map((wallet: { id: string; name: string; current_value_primary: number }) => (
+                    <option key={wallet.id} value={wallet.id}>
+                      {wallet.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-muted-foreground">{t('goals.walletHint')}</p>
               </div>
             )}
 
