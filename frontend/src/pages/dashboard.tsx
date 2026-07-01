@@ -34,6 +34,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ICON_MAP } from '@/lib/category-icons'
 import { PageHeader } from '@/components/page-header'
 import { CategoryIcon } from '@/components/category-icon'
+import { TransactionCategoryDisplay } from '@/components/transaction-category-display'
 import { AccountIcon } from '@/components/account-icon'
 import { TransactionDrillDown, type DrillDownFilter } from '@/components/transaction-drill-down'
 import { TransactionDialog, extractApiError } from '@/components/transaction-dialog'
@@ -42,7 +43,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
-import type { Rule, Transaction } from '@/types'
+import type { Rule, Transaction, TransactionUpdatePayload } from '@/types'
 
 function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
@@ -183,7 +184,7 @@ export default function DashboardPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id, ...data }: Partial<Transaction> & { id: string }) =>
+    mutationFn: ({ id, ...data }: TransactionUpdatePayload & { id: string }) =>
       transactions.update(id, data),
     onSuccess: () => {
       invalidateFinancialQueries(queryClient)
@@ -358,6 +359,7 @@ export default function DashboardPage() {
     parentOwnerName: string | null
     groupName: string | null
     isIgnored: boolean
+    transaction: Transaction | null
   }
 
   const TX_PER_PAGE = 10
@@ -397,7 +399,8 @@ export default function DashboardPage() {
         groupId,
         parentOwnerName: isShared ? tx.parent_owner_name ?? null : null,
         groupName: groupId ? groupNameById.get(groupId) ?? null : null,
-        isIgnored: tx.is_ignored
+        isIgnored: tx.is_ignored,
+        transaction: tx,
       })
     }
     for (const pt of projectedTxs ?? []) {
@@ -421,7 +424,8 @@ export default function DashboardPage() {
         groupId: null,
         parentOwnerName: null,
         groupName: null,
-        isIgnored: pt.is_ignored
+        isIgnored: pt.is_ignored,
+        transaction: null,
       })
     }
     rows.sort((a, b) => txSortDesc ? b.date.localeCompare(a.date) : a.date.localeCompare(b.date))
@@ -1033,6 +1037,9 @@ export default function DashboardPage() {
                                   {t('transactions.recurringBadge')}
                                 </span>
                               )}
+                              {row.transaction && row.transaction.allocations.length > 0 && (
+                                <TransactionCategoryDisplay transaction={row.transaction} />
+                              )}
                               {row.isIgnored && (
                                 <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-600 font-normal bg-gray-100 border border-gray-200 rounded px-1.5 py-0.5">
                                 <EyeClosed className="h-3 w-3" />
@@ -1142,7 +1149,7 @@ export default function DashboardPage() {
         transaction={editingTx}
         categories={categoriesList ?? []}
         categoryGroups={categoryGroupsList ?? []}
-        accounts={(accountsList ?? []).map((a: { id: string; name: string; display_name?: string | null }) => ({ id: a.id, name: getAccountName(a) }))}
+        accounts={(accountsList ?? []).map((a: { id: string; name: string; display_name?: string | null; type?: string; currency?: string }) => ({ id: a.id, name: getAccountName(a), type: a.type, currency: a.currency }))}
         onSave={(data) => {
           if (editingTx) updateMutation.mutate({ id: editingTx.id, ...data })
         }}
@@ -1167,7 +1174,7 @@ export default function DashboardPage() {
         rule={null}
         categories={categoriesList ?? []}
         categoryGroups={categoryGroupsList ?? []}
-        accounts={(accountsList ?? []).map((a: { id: string; name: string; display_name?: string | null }) => ({ id: a.id, name: getAccountName(a) }))}
+        accounts={(accountsList ?? []).map((a: { id: string; name: string; display_name?: string | null; type?: string; currency?: string }) => ({ id: a.id, name: getAccountName(a), type: a.type, currency: a.currency }))}
         payees={payeesList ?? []}
         onSave={(data) => createRuleMutation.mutate(data as Omit<Rule, 'id' | 'user_id'>)}
         loading={createRuleMutation.isPending}

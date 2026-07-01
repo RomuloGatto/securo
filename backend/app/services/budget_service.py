@@ -18,6 +18,7 @@ from app.services._query_filters import (
     reporting_date_col,
 )
 from app.services.admin_service import get_credit_card_accounting_mode
+from app.services.allocation_reporting_service import allocation_spending_by_category
 from app.services.dashboard_service import _get_recurring_projections
 from app.services.fx_rate_service import convert
 from app.core.config import get_settings
@@ -281,6 +282,20 @@ async def get_budget_vs_actual(
     for row in spending_result.all():
         spending_map[str(row[0])] = abs(row[1] or Decimal("0"))
 
+    allocation_spending = await allocation_spending_by_category(
+        session,
+        workspace_id,
+        month_start,
+        month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+    )
+    for cat_uuid, total in allocation_spending.items():
+        if cat_uuid is None:
+            continue
+        cat_id = str(cat_uuid)
+        spending_map[cat_id] = spending_map.get(cat_id, Decimal("0")) + abs(total)
+
     # Subtract non-owner shares of own splits — only the user's share counts.
     own_offset = await owner_split_offset_by_category(
         session, user_id, month_start, month_end,
@@ -345,6 +360,20 @@ async def get_budget_vs_actual(
     prev_spending_map: dict[str, Decimal] = {}
     for row in prev_spending_result.all():
         prev_spending_map[str(row[0])] = abs(row[1] or Decimal("0"))
+
+    prev_allocation_spending = await allocation_spending_by_category(
+        session,
+        workspace_id,
+        prev_month_start,
+        prev_month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+    )
+    for cat_uuid, total in prev_allocation_spending.items():
+        if cat_uuid is None:
+            continue
+        cat_id = str(cat_uuid)
+        prev_spending_map[cat_id] = prev_spending_map.get(cat_id, Decimal("0")) + abs(total)
 
     prev_own_offset = await owner_split_offset_by_category(
         session, user_id, prev_month_start, prev_month_end,

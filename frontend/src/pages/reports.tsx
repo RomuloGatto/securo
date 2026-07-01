@@ -829,12 +829,16 @@ export default function ReportsPage() {
                   tickCount={5}
                 />
                 <Tooltip
-                  formatter={(value?: number, name?: string) => [
-                    privacyMode ? MASK : formatCurrency(value ?? 0, userCurrency, locale),
-                    name === 'value'
-                      ? t('reports.netIncome')
-                      : t(`reports.${name ?? ''}`, { defaultValue: name ?? '' }),
-                  ]}
+                  formatter={(value, name) => {
+                    const numericValue = typeof value === 'number' ? value : Number(value ?? 0)
+                    const label = typeof name === 'string' ? name : String(name ?? '')
+                    return [
+                      privacyMode ? MASK : formatCurrency(numericValue, userCurrency, locale),
+                      label === 'value'
+                        ? t('reports.netIncome')
+                        : t(`reports.${label}`, { defaultValue: label }),
+                    ]
+                  }}
                   labelFormatter={(label) => label}
                   contentStyle={tooltipStyle}
                 />
@@ -1289,10 +1293,13 @@ export default function ReportsPage() {
                                     </defs>
                                     <XAxis dataKey="date" hide />
                                     <Tooltip
-                                      formatter={(value?: number) => [
-                                        privacyMode ? MASK : formatCurrency(value ?? 0, userCurrency, locale),
-                                        item.label,
-                                      ]}
+                                      formatter={(value) => {
+                                        const numericValue = typeof value === 'number' ? value : Number(value ?? 0)
+                                        return [
+                                          privacyMode ? MASK : formatCurrency(numericValue, userCurrency, locale),
+                                          item.label,
+                                        ]
+                                      }}
                                       labelFormatter={(label) => label}
                                       contentStyle={{ ...tooltipStyle, padding: '4px 8px' }}
                                     />

@@ -5,6 +5,7 @@ import { useQuery } from '@tanstack/react-query'
 import { transactions as transactionsApi, dashboard, admin } from '@/lib/api'
 import { AlertTriangle, Info, Paperclip, X } from 'lucide-react'
 import { CategoryIcon } from '@/components/category-icon'
+import { TransactionCategoryDisplay } from '@/components/transaction-category-display'
 import { useAuth } from '@/contexts/auth-context'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import type { Transaction } from '@/types'
@@ -263,7 +264,9 @@ export function TransactionDrillDown({
                     </div>
                     <p className="text-xs text-muted-foreground">
                       {new Date(item.date + 'T00:00:00').toLocaleDateString(dateLocale)}
-                      {item.categoryName && ` · ${item.categoryName}`}
+                      {item.transaction && item.transaction.allocations.length > 0 ? (
+                        <span className="ml-1"><TransactionCategoryDisplay transaction={item.transaction} /></span>
+                      ) : item.categoryName ? ` · ${item.categoryName}` : null}
                     </p>
                   </div>
                   <div className="text-right shrink-0">

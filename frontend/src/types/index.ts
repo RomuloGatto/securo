@@ -217,6 +217,7 @@ export interface Transaction {
   // bill whose due_date matches.
   effective_bill_date: string | null
   splits: TransactionSplit[]
+  allocations: TransactionAllocation[]
   // Shared-transaction view fields. Set per-request when the viewer
   // is a linked split member but not the owner. Render `viewer_share`
   // as the amount and treat the row as read-only — editing belongs
@@ -254,6 +255,36 @@ export interface TransactionSplitInput {
 export interface TransactionSplitsInput {
   share_type: ShareType
   splits: TransactionSplitInput[]
+}
+
+export type TransactionAllocationKind = 'category' | 'transfer'
+
+export interface TransactionAllocation {
+  id: string
+  transaction_id: string
+  kind: TransactionAllocationKind
+  amount: number
+  category_id: string | null
+  transfer_account_id: string | null
+  counterpart_transaction_id: string | null
+  counterpart_created: boolean
+  notes: string | null
+  sort_order: number
+  created_at: string | null
+}
+
+export interface TransactionAllocationInput {
+  kind: TransactionAllocationKind
+  amount: number
+  category_id?: string | null
+  transfer_account_id?: string | null
+  counterpart_transaction_id?: string | null
+  notes?: string | null
+}
+
+export type TransactionUpdatePayload = Partial<Transaction> & {
+  apply_to_transfer_pair?: boolean
+  allocations?: TransactionAllocationInput[] | null
 }
 
 export type GroupKind = 'social' | 'cost_center' | 'project' | 'client' | 'other'

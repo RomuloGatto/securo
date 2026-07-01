@@ -35,7 +35,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import type { Transaction, Rule } from '@/types'
+import type { Rule, Transaction, TransactionUpdatePayload } from '@/types'
 import { RuleDialog, type RuleDialogInitialData } from '@/components/rule-dialog'
 import { PageHeader } from '@/components/page-header'
 import { calculateRangeSelection } from '@/lib/selection-utils'
@@ -48,14 +48,11 @@ import { TransferDialog } from '@/components/transfer-dialog'
 import { LinkTransferDialog } from '@/components/link-transfer-dialog'
 import { BulkAddToGroupDialog, type BulkAddToGroupSubmission } from '@/components/bulk-add-to-group-dialog'
 import { TransactionsFilterBar } from '@/components/transactions-filter-bar'
+import { TransactionCategoryDisplay } from '@/components/transaction-category-display'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
-
-type TransactionUpdatePayload = Partial<Transaction> & {
-  apply_to_transfer_pair?: boolean
-}
 
 type PendingTransferCategoryUpdate = {
   id: string
@@ -407,7 +404,7 @@ export default function TransactionsPage() {
   const invalidateAfterTxMutation = () => invalidateFinancialQueries(queryClient)
 
   const createMutation = useMutation({
-    mutationFn: async (payload: { tx: Partial<Transaction>; recurringData?: { frequency: string; end_date?: string }; pendingFiles?: File[]; action?: SaveAction }) => {
+    mutationFn: async (payload: { tx: TransactionUpdatePayload; recurringData?: { frequency: string; end_date?: string }; pendingFiles?: File[]; action?: SaveAction }) => {
       const created = await transactions.create(payload.tx)
       if (payload.recurringData) {
         await recurring.create({
@@ -715,7 +712,7 @@ export default function TransactionsPage() {
   }
 
   const handleTransactionSave = (
-    data: Partial<Transaction>,
+    data: TransactionUpdatePayload,
     recurringData?: { frequency: string; end_date?: string },
     pendingFiles?: File[],
     action?: SaveAction,
@@ -997,16 +994,13 @@ export default function TransactionsPage() {
             {renderDescriptionCell(tx)}
           </TableCell>
         )
-      case 'category':
+      case 'category': {
         return (
           <TableCell key={col.id} style={widthStyle} className={baseClass}>
-            {tx.category ? (
-              <span className="text-sm text-muted-foreground">{tx.category.name}</span>
-            ) : (
-              <span className="text-xs text-muted-foreground italic">{t('transactions.noCategory')}</span>
-            )}
+            <TransactionCategoryDisplay transaction={tx} empty={t('transactions.noCategory')} />
           </TableCell>
         )
+      }
       case 'account': {
         const acc = accountsList?.find((a) => a.id === tx.account_id)
         return (

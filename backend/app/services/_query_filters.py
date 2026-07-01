@@ -48,6 +48,9 @@ def counts_as_pnl():
       - transactions in categories flagged `treat_as_transfer` (one-sided
         movements like investment applications where the counterpart is
         an Asset/Holding, not another Account),
+      - transactions that already have payment allocations (category allocation
+        lines are counted explicitly by allocation-aware reporting queries),
+      - transactions used as transfer-allocation counterparts,
       - transactions flagged `is_ignored=True` (user-marked as not to be reported),
       - transactions in categories flagged `is_ignored=True` (user-marked as not to be reported).
 
@@ -55,8 +58,16 @@ def counts_as_pnl():
     filter those keep doing so; this helper only handles the transfer-like
     exclusion family so both rules stay visible at each call site.
     """
+    from app.models.transaction_allocation import TransactionAllocation
+
     return and_(
         Transaction.transfer_pair_id.is_(None),
+        ~select(TransactionAllocation.id)
+        .where(TransactionAllocation.transaction_id == Transaction.id)
+        .exists(),
+        ~select(TransactionAllocation.id)
+        .where(TransactionAllocation.counterpart_transaction_id == Transaction.id)
+        .exists(),
         Transaction.is_ignored.is_(False),
         # Settlement *debits* are repayments of debts that were already
         # booked as an expense via the share. Counting them would

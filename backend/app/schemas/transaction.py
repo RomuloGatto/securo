@@ -6,6 +6,10 @@ from typing import Literal, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.schemas.category import CategoryRead
+from app.schemas.transaction_allocation import (
+    TransactionAllocationInput,
+    TransactionAllocationRead,
+)
 from app.schemas.transaction_split import (
     TransactionSplitInput,
     TransactionSplitRead,
@@ -34,6 +38,7 @@ class TransactionCreate(TransactionBase):
     fx_rate_used: Optional[Decimal] = None
     effective_bill_date: Optional[_Date] = None
     splits: Optional[TransactionSplitsInput] = None
+    allocations: Optional[list[TransactionAllocationInput]] = None
 
 
 class TransactionUpdate(BaseModel):
@@ -56,6 +61,7 @@ class TransactionUpdate(BaseModel):
     # When provided, replaces the transaction's splits wholesale. Pass
     # an object with an empty `splits` list to clear them.
     splits: Optional[TransactionSplitsInput] = None
+    allocations: Optional[list[TransactionAllocationInput]] = None
 
 
 class TransactionRead(TransactionBase):
@@ -83,6 +89,7 @@ class TransactionRead(TransactionBase):
     bill_id: Optional[uuid.UUID] = None
     effective_bill_date: Optional[_Date] = None
     splits: list[TransactionSplitRead] = []
+    allocations: list[TransactionAllocationRead] = []
     # Shared-transaction view fields. Set per-request when the viewer
     # is a linked member of one of this transaction's splits but not
     # its owner. The viewer sees their share amount instead of the

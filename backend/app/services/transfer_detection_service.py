@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.transaction import Transaction
+from app.models.transaction_allocation import TransactionAllocation
 
 
 async def detect_transfer_pairs(
@@ -25,12 +26,19 @@ async def detect_transfer_pairs(
 
     Returns the number of pairs created.
     """
+    allocation_parent_ids = select(TransactionAllocation.transaction_id)
+    allocation_counterpart_ids = select(TransactionAllocation.counterpart_transaction_id).where(
+        TransactionAllocation.counterpart_transaction_id.isnot(None)
+    )
+
     # Load candidate debits — filtered to candidate_ids when provided
     debit_query = select(Transaction).where(
         Transaction.workspace_id == workspace_id,
         Transaction.type == "debit",
         Transaction.transfer_pair_id.is_(None),
         Transaction.source != "opening_balance",
+        Transaction.id.not_in(allocation_parent_ids),
+        Transaction.id.not_in(allocation_counterpart_ids),
     )
     if candidate_ids:
         debit_query = debit_query.where(Transaction.id.in_(candidate_ids))
@@ -47,6 +55,8 @@ async def detect_transfer_pairs(
             Transaction.transfer_pair_id.is_(None),
             Transaction.source != "opening_balance",
             Transaction.id.not_in(candidate_ids),
+            Transaction.id.not_in(allocation_parent_ids),
+            Transaction.id.not_in(allocation_counterpart_ids),
         )
         reverse_result = await session.execute(reverse_debit_query)
         reverse_debits = list(reverse_result.scalars().all())
@@ -64,6 +74,8 @@ async def detect_transfer_pairs(
         Transaction.type == "credit",
         Transaction.transfer_pair_id.is_(None),
         Transaction.source != "opening_balance",
+        Transaction.id.not_in(allocation_parent_ids),
+        Transaction.id.not_in(allocation_counterpart_ids),
     )
     credit_result = await session.execute(credit_query)
     credits = list(credit_result.scalars().all())

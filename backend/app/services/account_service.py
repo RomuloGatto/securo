@@ -11,10 +11,15 @@ from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.credit_card_bill import CreditCardBill
 from app.models.transaction import Transaction
+from app.models.transaction_allocation import TransactionAllocation
+from app.models.category import Category
 from app.schemas.account import AccountCreate, AccountUpdate
 from app.services._query_filters import counts_as_pnl
+from app.services.allocation_reporting_service import (
+    allocation_category_filter,
+    proportional_allocation_amount_expr,
+)
 from app.services.credit_card_service import apply_effective_date, compute_available_credit, get_cycle_dates
-from app.models.category import Category
 
 
 def get_account_name(account: Account) -> str:
@@ -737,6 +742,27 @@ async def get_account_summary(
         ))
     )
     monthly_income = float(income_result.scalar())
+    converted_allocation_amount = proportional_allocation_amount_expr(
+        Transaction.amount,
+        Transaction.amount_primary,
+    )
+    allocation_effective_amount = case(
+        (Transaction.currency == account.currency, TransactionAllocation.amount),
+        else_=converted_allocation_amount,
+    )
+    allocation_income_result = await session.execute(
+        _scope(
+            select(func.coalesce(func.sum(allocation_effective_amount), 0))
+            .select_from(TransactionAllocation)
+            .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+            .where(
+                Transaction.account_id == account_id,
+                Transaction.type == "credit",
+                allocation_category_filter(),
+            )
+        )
+    )
+    monthly_income += float(allocation_income_result.scalar() or 0)
 
     # Expenses = SUM of debit transactions in window (same exclusions).
     # For credit-card accounts, NET refund credits against debits so the
@@ -764,6 +790,37 @@ async def get_account_summary(
             ))
         )
     monthly_expenses = float(expenses_result.scalar())
+    if account.type == "credit_card":
+        allocation_signed_for_bill = case(
+            (Transaction.type == "credit", -func.abs(allocation_effective_amount)),
+            else_=func.abs(allocation_effective_amount),
+        )
+        allocation_expenses_result = await session.execute(
+            _scope(
+                select(func.coalesce(func.sum(allocation_signed_for_bill), 0))
+                .select_from(TransactionAllocation)
+                .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+                .where(
+                    Transaction.account_id == account_id,
+                    allocation_category_filter(),
+                )
+            )
+        )
+        monthly_expenses += float(allocation_expenses_result.scalar() or 0)
+    else:
+        allocation_expenses_result = await session.execute(
+            _scope(
+                select(func.coalesce(func.sum(func.abs(allocation_effective_amount)), 0))
+                .select_from(TransactionAllocation)
+                .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+                .where(
+                    Transaction.account_id == account_id,
+                    Transaction.type == "debit",
+                    allocation_category_filter(),
+                )
+            )
+        )
+        monthly_expenses += float(allocation_expenses_result.scalar() or 0)
 
     return {
         "account_id": account_id,

@@ -16,7 +16,7 @@ from app.core.workspace_context import (
     current_writable_workspace,
 )
 from app.schemas.transaction import BulkAddToGroupRequest, BulkCategorizeRequest, BulkTagsRequest, CreateCounterpartRequest, LinkTransferRequest, TransactionCreate, TransactionRead, TransactionUpdate, TransferCreate, TransferRead
-from app.services import transaction_service
+from app.services import allocation_service, transaction_service
 from app.services.admin_service import get_credit_card_accounting_mode
 
 router = APIRouter(prefix="/api/transactions", tags=["transactions"])
@@ -317,6 +317,33 @@ async def create_counterpart(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 
+@router.get("/{transaction_id}/allocation-candidates", response_model=list[TransactionRead])
+async def get_transfer_allocation_candidates(
+    transaction_id: uuid.UUID,
+    transfer_account_id: uuid.UUID = Query(...),
+    amount: float = Query(..., gt=0),
+    limit: int = Query(10, ge=1, le=50),
+    window_days: int = Query(30, ge=1, le=365),
+    ctx: WorkspaceContext = Depends(current_workspace),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """Return candidate transactions for a transfer allocation line."""
+    candidates = await allocation_service.get_transfer_allocation_candidates(
+        session,
+        ctx.workspace.id,
+        transaction_id,
+        transfer_account_id,
+        amount,
+        limit=limit,
+        window_days=window_days,
+    )
+    primary_currency = ctx.user.primary_currency
+    return [
+        _tag_fx_fallback(TransactionRead.model_validate(tx, from_attributes=True), primary_currency)
+        for tx in candidates
+    ]
+
+
 @router.get("/{transaction_id}/transfer-candidates", response_model=list[TransactionRead])
 async def get_transfer_candidates(
     transaction_id: uuid.UUID,
@@ -394,9 +421,12 @@ async def toggle_ignore_transaction(
     ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    transaction = await transaction_service.toggle_ignore_transaction(
-        session, transaction_id, ctx.workspace.id
-    )
+    try:
+        transaction = await transaction_service.toggle_ignore_transaction(
+            session, transaction_id, ctx.workspace.id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not transaction:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
     primary_currency = ctx.user.primary_currency
@@ -409,8 +439,11 @@ async def delete_transaction(
     ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    deleted = await transaction_service.delete_transaction(
-        session, transaction_id, ctx.workspace.id
-    )
+    try:
+        deleted = await transaction_service.delete_transaction(
+            session, transaction_id, ctx.workspace.id
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     if not deleted:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")

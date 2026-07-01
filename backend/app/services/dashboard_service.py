@@ -10,6 +10,7 @@ from app.core.config import get_settings
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.transaction import Transaction
+from app.models.transaction_allocation import TransactionAllocation
 from app.models.category import Category
 from app.models.recurring_transaction import RecurringTransaction
 from app.schemas.dashboard import DashboardSummary, SpendingByCategory, MonthlyTrend, ProjectedTransaction, DailyBalance, BalanceHistory
@@ -22,6 +23,10 @@ from app.services._query_filters import (
     viewer_shared_spending_by_category,
 )
 from app.services.admin_service import get_credit_card_accounting_mode
+from app.services.allocation_reporting_service import (
+    allocation_pnl_totals,
+    allocation_spending_by_category,
+)
 from app.services.recurring_transaction_service import get_occurrences_in_range
 from app.services.asset_service import get_asset_values_at
 from app.services.fx_rate_service import convert
@@ -166,6 +171,16 @@ async def get_summary(
     monthly_row = monthly_result.one()
     monthly_income = float(monthly_row[0] or 0)
     monthly_expenses = float(monthly_row[1] or 0)
+    alloc_income, alloc_expenses = await allocation_pnl_totals(
+        session,
+        workspace_id,
+        month_start,
+        month_end,
+        use_effective_date=accounting_mode == "accrual",
+        account_ids=account_ids if filtered else None,
+    )
+    monthly_income += alloc_income
+    monthly_expenses += alloc_expenses
 
     if not filtered:
         # Subtract non-owner shares of the user's own split txs — they paid
@@ -215,7 +230,13 @@ async def get_summary(
             .where(Account.workspace_id == workspace_id)
         ) or 0
 
-    # Pending categorization — exclude opening_balance and transfer pairs
+    # Pending categorization — exclude opening_balance, transfer pairs, and
+    # payment-split parents/counterparts (their allocation lines carry the
+    # meaningful categorization/reporting state).
+    allocation_parent_ids = select(TransactionAllocation.transaction_id)
+    allocation_counterpart_ids = select(TransactionAllocation.counterpart_transaction_id).where(
+        TransactionAllocation.counterpart_transaction_id.isnot(None)
+    )
     pending_cat_filters = [
         Transaction.workspace_id == workspace_id,
         Transaction.category_id.is_(None),
@@ -225,6 +246,8 @@ async def get_summary(
         # income that need a category, so exclude them.
         Transaction.source != "settlement",
         Transaction.transfer_pair_id.is_(None),
+        Transaction.id.not_in(allocation_parent_ids),
+        Transaction.id.not_in(allocation_counterpart_ids),
         *acct_filter,
     ]
     pending_categorization = await session.scalar(
@@ -289,6 +312,17 @@ async def get_summary(
     if primary_row[0] is not None or primary_row[1] is not None:
         monthly_income_primary = float(primary_row[0] or 0)
         monthly_expenses_primary = abs(float(primary_row[1] or 0))
+    alloc_income_primary, alloc_expenses_primary = await allocation_pnl_totals(
+        session,
+        workspace_id,
+        month_start,
+        month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+        account_ids=account_ids if filtered else None,
+    )
+    monthly_income_primary += alloc_income_primary
+    monthly_expenses_primary += alloc_expenses_primary
 
     if not filtered:
         # Apply share-only offset in primary currency (FX-converted).
@@ -524,6 +558,34 @@ async def get_spending_by_category(
             "total": abs(float(row[4] or 0)),
         }
 
+    allocation_spending = await allocation_spending_by_category(
+        session,
+        workspace_id,
+        month_start,
+        month_end,
+        use_effective_date=accounting_mode == "accrual",
+        primary_currency=primary_currency,
+        account_ids=account_ids if filtered else None,
+    )
+    for cat_uuid, total in allocation_spending.items():
+        cat_id = str(cat_uuid) if cat_uuid else None
+        if cat_id in spending_map:
+            spending_map[cat_id]["total"] += abs(float(total))
+            continue
+        meta = None
+        if cat_uuid is not None:
+            meta = (
+                await session.execute(
+                    select(Category.name, Category.icon, Category.color).where(Category.id == cat_uuid)
+                )
+            ).one_or_none()
+        spending_map[cat_id] = {
+            "name": meta[0] if meta else "Sem categoria",
+            "icon": meta[1] if meta else "circle-help",
+            "color": meta[2] if meta else "#6B7280",
+            "total": abs(float(total)),
+        }
+
     # Subtract non-owner shares per category — owner-side splits should
     # contribute only the owner's share, not the full amount.
     owner_offset = {} if filtered else await owner_split_offset_by_category(
@@ -687,6 +749,17 @@ async def get_monthly_trend(
             if int(mnum) < 12
             else date(int(year) + 1, 1, 1)
         )
+        alloc_inc, alloc_exp = await allocation_pnl_totals(
+            session,
+            workspace_id,
+            m_start,
+            m_end,
+            use_effective_date=accounting_mode == "accrual",
+            primary_currency=primary_currency,
+            account_ids=account_ids if filtered else None,
+        )
+        income += alloc_inc
+        expenses += alloc_exp
         if filtered:
             own_inc, own_exp, shared_inc, shared_exp = 0.0, 0.0, 0.0, 0.0
         else:

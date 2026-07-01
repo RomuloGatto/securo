@@ -51,6 +51,7 @@ import type {
   GroupSettlement,
   GroupBalances,
   TransactionSplitsInput,
+  TransactionUpdatePayload,
 } from '@/types'
 
 const api = axios.create({
@@ -443,13 +444,13 @@ export const transactions = {
     const { data } = await api.get(`/transactions/${id}`)
     return data
   },
-  create: async (transaction: Partial<Transaction>): Promise<Transaction> => {
+  create: async (transaction: TransactionUpdatePayload): Promise<Transaction> => {
     const { data } = await api.post('/transactions', transaction)
     return data
   },
   update: async (
     id: string,
-    transaction: Partial<Transaction> & { apply_to_transfer_pair?: boolean },
+    transaction: TransactionUpdatePayload,
   ): Promise<Transaction> => {
     const { data } = await api.patch(`/transactions/${id}`, transaction)
     return data
@@ -527,6 +528,13 @@ export const transactions = {
   },
   transferCandidates: async (transactionId: string, params?: { limit?: number; window_days?: number }): Promise<Transaction[]> => {
     const { data } = await api.get(`/transactions/${transactionId}/transfer-candidates`, { params })
+    return data
+  },
+  allocationCandidates: async (
+    transactionId: string,
+    params: { transfer_account_id: string; amount: number; limit?: number; window_days?: number },
+  ): Promise<Transaction[]> => {
+    const { data } = await api.get(`/transactions/${transactionId}/allocation-candidates`, { params })
     return data
   },
   unlinkTransfer: async (pairId: string): Promise<void> => {

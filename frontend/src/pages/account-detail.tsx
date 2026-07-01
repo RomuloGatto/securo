@@ -8,11 +8,11 @@ import { format, addDays, addMonths, parseISO } from 'date-fns'
 import { accounts, transactions, categories as categoriesApi, categoryGroups as categoryGroupsApi } from '@/lib/api'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
-import type { CreditCardBill, Transaction } from '@/types'
+import type { CreditCardBill, Transaction, TransactionUpdatePayload } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, X } from 'lucide-react'
-import { CategoryIcon } from '@/components/category-icon'
+import { TransactionCategoryDisplay } from '@/components/transaction-category-display'
 import { TransactionDialog, extractApiError } from '@/components/transaction-dialog'
 import { TransferDialog } from '@/components/transfer-dialog'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
@@ -534,7 +534,7 @@ export default function AccountDetailPage() {
   })
 
   const updateMutation = useMutation({
-    mutationFn: ({ id: txId, ...data }: Partial<Transaction> & { id: string }) =>
+    mutationFn: ({ id: txId, ...data }: TransactionUpdatePayload & { id: string }) =>
       transactions.update(txId, data),
     onSuccess: () => {
       invalidateFinancialQueries(queryClient)
@@ -1433,14 +1433,7 @@ export default function AccountDetailPage() {
                           )}
                         </td>
                         <td className="px-4 py-3 hidden md:table-cell">
-                          {tx.category ? (
-                            <span className="flex items-center gap-1.5">
-                              <CategoryIcon icon={tx.category.icon} color={tx.category.color} size="sm" />
-                              <span className="text-sm text-muted-foreground">{tx.category.name}</span>
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          <TransactionCategoryDisplay transaction={tx} />
                         </td>
                         <td className={`px-3 sm:px-4 py-3 text-right text-xs sm:text-sm font-semibold tabular-nums ${tx.is_ignored ? 'text-gray-500' : tx.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
                           {mask(`${tx.is_ignored ? ' ' : tx.type === 'credit' ? '+' : '-'}${formatCurrency(Math.abs(Number(tx.amount)), tx.currency, locale)}`)}

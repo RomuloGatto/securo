@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.transaction import Transaction
+from app.models.transaction_allocation import TransactionAllocation
+from app.models.transaction_split import TransactionSplit
 from app.models.transaction_attachment import TransactionAttachment
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
@@ -17,11 +19,12 @@ from app.models.group import Group, GroupMember
 from app.models.payee import Payee
 from app.schemas.transaction import TransactionCreate, TransactionUpdate, TransferCreate
 from app.schemas.transaction_split import TransactionSplitInput, TransactionSplitsInput
-from app.services import split_service
+from app.services import allocation_service, split_service
 from app.services.credit_card_service import apply_effective_date
 from app.services.rule_service import apply_rules_to_transaction
 from app.services.fx_rate_service import stamp_primary_amount, convert as fx_convert
 from app.services._query_filters import counts_as_pnl, reporting_date_col
+from app.services.allocation_reporting_service import proportional_allocation_amount_expr
 
 
 def _apply_fx_override(transaction, amount, amount_primary=None, fx_rate_used=None):
@@ -138,6 +141,7 @@ async def get_transactions(
             selectinload(Transaction.account),
             selectinload(Transaction.payee_entity),
             selectinload(Transaction.splits),
+            selectinload(Transaction.allocations),
         )
     )
     if transaction_ids:
@@ -202,15 +206,55 @@ async def get_transactions(
     elif account_id:
         base_query = base_query.where(Transaction.account_id == account_id)
     if category_ids:
-        base_query = base_query.where(Transaction.category_id.in_(category_ids))
+        has_allocations = (
+            select(TransactionAllocation.id)
+            .where(TransactionAllocation.transaction_id == Transaction.id)
+            .exists()
+        )
+        allocated_category_tx_ids = (
+            select(TransactionAllocation.transaction_id)
+            .where(
+                TransactionAllocation.kind == "category",
+                TransactionAllocation.category_id.in_(category_ids),
+            )
+        )
+        base_query = base_query.where(or_(
+            # Allocated transactions are classified by their allocation lines,
+            # not by the legacy parent category field.
+            Transaction.category_id.in_(category_ids) & ~has_allocations,
+            Transaction.id.in_(allocated_category_tx_ids),
+        ))
     elif category_id:
-        base_query = base_query.where(Transaction.category_id == category_id)
+        has_allocations = (
+            select(TransactionAllocation.id)
+            .where(TransactionAllocation.transaction_id == Transaction.id)
+            .exists()
+        )
+        allocated_category_tx_ids = (
+            select(TransactionAllocation.transaction_id)
+            .where(
+                TransactionAllocation.kind == "category",
+                TransactionAllocation.category_id == category_id,
+            )
+        )
+        base_query = base_query.where(or_(
+            # Allocated transactions are classified by their allocation lines,
+            # not by the legacy parent category field.
+            (Transaction.category_id == category_id) & ~has_allocations,
+            Transaction.id.in_(allocated_category_tx_ids),
+        ))
     if payee_id:
         base_query = base_query.where(Transaction.payee_id == payee_id)
     if uncategorized:
+        has_allocations = (
+            select(TransactionAllocation.id)
+            .where(TransactionAllocation.transaction_id == Transaction.id)
+            .exists()
+        )
         base_query = base_query.where(
             Transaction.category_id == None,
             Transaction.transfer_pair_id.is_(None),
+            ~has_allocations,
         )
     if exclude_transfers:
         base_query = base_query.where(Transaction.transfer_pair_id.is_(None))
@@ -365,8 +409,11 @@ async def get_transactions(
         # Income / expense / net use the shared `counts_as_pnl()` definition
         # (issue #242) so the footer matches the dashboard & reports: paired
         # transfers, `treat_as_transfer` categories (transfers, investments,
-        # custom) and ignored items are kept OUT of income/expense.
+        # custom) and ignored items are kept OUT of income/expense. Payment
+        # allocations are added line-by-line below so the parent transaction
+        # is never double-counted.
         pnl_filter = counts_as_pnl()
+        filtered_subq = base_query.subquery()
         pnl_subq = base_query.where(pnl_filter).subquery()
         amount_norm = func.coalesce(
             pnl_subq.c.amount_primary, pnl_subq.c.amount
@@ -385,11 +432,58 @@ async def get_transactions(
             elif row_type == "debit":
                 expense = Decimal(str(row_total or 0))
 
+        allocation_amount_norm = proportional_allocation_amount_expr(
+            filtered_subq.c.amount,
+            filtered_subq.c.amount_primary,
+        )
+        allocation_category_pnl_filter = or_(
+            TransactionAllocation.category_id.is_(None),
+            TransactionAllocation.category_id.not_in(
+                select(Category.id).where(
+                    or_(
+                        Category.treat_as_transfer.is_(True),
+                        Category.is_ignored.is_(True),
+                    )
+                )
+            ),
+        )
+        allocation_summary_filters = []
+        if category_ids:
+            allocation_summary_filters.append(TransactionAllocation.category_id.in_(category_ids))
+        elif category_id:
+            allocation_summary_filters.append(TransactionAllocation.category_id == category_id)
+        allocation_summary_rows = await session.execute(
+            select(
+                filtered_subq.c.type,
+                func.coalesce(func.sum(func.abs(allocation_amount_norm)), 0),
+            )
+            .select_from(filtered_subq)
+            .join(TransactionAllocation, TransactionAllocation.transaction_id == filtered_subq.c.id)
+            .where(
+                TransactionAllocation.kind == "category",
+                allocation_category_pnl_filter,
+                *allocation_summary_filters,
+            )
+            .group_by(filtered_subq.c.type)
+        )
+        for row_type, row_total in allocation_summary_rows:
+            if row_type == "credit":
+                income += Decimal(str(row_total or 0))
+            elif row_type == "debit":
+                expense += Decimal(str(row_total or 0))
+
         # Excluded: the absolute total of everything filtered out of P/L for
         # the same rows — the complement of `counts_as_pnl()`. Surfaces
         # transfer-like movement (e.g. how much was moved/invested) without
-        # distorting income/expense/net.
-        excl_subq = base_query.where(not_(pnl_filter)).subquery()
+        # distorting income/expense/net. For allocated parent transactions,
+        # include only the transfer allocation lines here instead of the full
+        # parent amount; category allocation lines were counted above.
+        allocated_parent_exists = (
+            select(TransactionAllocation.id)
+            .where(TransactionAllocation.transaction_id == Transaction.id)
+            .exists()
+        )
+        excl_subq = base_query.where(not_(pnl_filter), ~allocated_parent_exists).subquery()
         excl_amount_norm = func.coalesce(
             excl_subq.c.amount_primary, excl_subq.c.amount
         )
@@ -397,6 +491,16 @@ async def get_transactions(
             select(func.coalesce(func.sum(func.abs(excl_amount_norm)), 0))
         )
         excluded = Decimal(str(excluded_total or 0))
+        transfer_allocation_total = Decimal("0")
+        if not category_ids and category_id is None and not uncategorized:
+            transfer_allocation_raw = await session.scalar(
+                select(func.coalesce(func.sum(func.abs(allocation_amount_norm)), 0))
+                .select_from(filtered_subq)
+                .join(TransactionAllocation, TransactionAllocation.transaction_id == filtered_subq.c.id)
+                .where(TransactionAllocation.kind == "transfer")
+            )
+            transfer_allocation_total = Decimal(str(transfer_allocation_raw or 0))
+        excluded += transfer_allocation_total
 
         summary = {
             "income": income,
@@ -612,6 +716,7 @@ async def get_transaction(
             selectinload(Transaction.category),
             selectinload(Transaction.payee_entity),
             selectinload(Transaction.splits),
+            selectinload(Transaction.allocations),
         )
     )
     transaction = result.scalar_one_or_none()
@@ -679,11 +784,17 @@ async def create_transaction(
     else:
         await stamp_primary_amount(session, user_id, transaction)
 
+    if data.splits is not None and data.allocations is not None and data.splits.splits and data.allocations:
+        raise ValueError("Payment allocations cannot be combined with group splits")
+
     if data.splits is not None:
         await split_service.replace_splits(session, transaction, data.splits, user_id)
 
+    if data.allocations is not None:
+        await allocation_service.replace_allocations(session, transaction, data.allocations, user_id)
+
     await session.commit()
-    await session.refresh(transaction, ["category", "splits"])
+    await session.refresh(transaction, ["category", "splits", "allocations"])
     return transaction
 
 
@@ -814,8 +925,14 @@ async def get_transfer_candidates(
     anchor = await get_transaction(session, transaction_id, workspace_id)
     if not anchor:
         return []
-    if anchor.transfer_pair_id is not None:
+    if anchor.transfer_pair_id is not None or await allocation_service.transaction_has_allocation_role(session, anchor.id):
         return []
+
+    allocation_parent_ids = select(TransactionAllocation.transaction_id)
+    allocation_counterpart_ids = select(TransactionAllocation.counterpart_transaction_id).where(
+        TransactionAllocation.counterpart_transaction_id.isnot(None)
+    )
+    split_transaction_ids = select(TransactionSplit.transaction_id)
 
     opposing_type = "credit" if anchor.type == "debit" else "debit"
     from_date = anchor.date - timedelta(days=window_days)
@@ -830,6 +947,9 @@ async def get_transfer_candidates(
             Transaction.type == opposing_type,
             Transaction.transfer_pair_id.is_(None),
             Transaction.source != "opening_balance",
+            Transaction.id.not_in(allocation_parent_ids),
+            Transaction.id.not_in(allocation_counterpart_ids),
+            Transaction.id.not_in(split_transaction_ids),
             Transaction.date >= from_date,
             Transaction.date <= to_date,
         )
@@ -838,6 +958,7 @@ async def get_transfer_candidates(
             selectinload(Transaction.account),
             selectinload(Transaction.payee_entity),
             selectinload(Transaction.splits),
+            selectinload(Transaction.allocations),
         )
     )
     candidates = list(result.scalars().all())
@@ -912,6 +1033,8 @@ async def link_existing_as_transfer(
     for tx in txns:
         if tx.transfer_pair_id is not None:
             raise ValueError("Transaction is already part of a transfer")
+        if await allocation_service.transaction_has_allocation_role(session, tx.id):
+            raise ValueError("Payment-split transactions cannot be linked as transfers")
 
     if txns[0].account_id == txns[1].account_id:
         raise ValueError("Transactions must be in different accounts")
@@ -956,6 +1079,8 @@ async def create_transfer_counterpart(
         raise ValueError("Transaction not found")
     if anchor.transfer_pair_id is not None:
         raise ValueError("Transaction is already part of a transfer")
+    if await allocation_service.transaction_has_allocation_role(session, anchor.id):
+        raise ValueError("Payment-split transactions cannot be linked as transfers")
     if anchor.account_id == to_account_id:
         raise ValueError("Counterpart must be in a different account")
 
@@ -1085,10 +1210,17 @@ async def update_transaction(
     update_data = data.model_dump(exclude_unset=True)
     apply_to_transfer_pair = update_data.pop("apply_to_transfer_pair", False)
 
-    # Splits are processed separately after column updates land so the
-    # service can validate against the new amount.
+    # Splits and payment allocations are processed separately after column
+    # updates land so each service can validate against the new amount.
     splits_payload = data.splits if "splits" in update_data else None
     update_data.pop("splits", None)
+    allocations_payload = data.allocations if "allocations" in update_data else None
+    update_data.pop("allocations", None)
+
+    if update_data or splits_payload is not None or allocations_payload is not None:
+        await allocation_service.ensure_not_allocation_counterpart(
+            session, transaction.id, action="edited"
+        )
 
     # Verify the new account belongs to the workspace before touching the
     # row. When changing the account on one side of a transfer pair,
@@ -1182,11 +1314,35 @@ async def update_transaction(
                 paired_account = await session.get(Account, paired_tx.account_id)
                 apply_effective_date(paired_tx, paired_account)
 
+    allocation_sensitive_fields = {"amount", "currency", "type", "account_id"}
+    if allocations_payload is None and transaction.allocations and (allocation_sensitive_fields & update_data.keys()):
+        raise ValueError(
+            "Updating amount, currency, type, or account on a payment-split transaction requires allocations"
+        )
+    if allocations_payload is None and transaction.allocations and ({"description", "date", "status"} & update_data.keys()):
+        await allocation_service.sync_generated_counterparts(session, transaction, user_id)
+
+    if (
+        allocations_payload is not None
+        and allocations_payload
+        and ((splits_payload is not None and splits_payload.splits) or (splits_payload is None and transaction.splits))
+    ):
+        raise ValueError("Payment allocations cannot be combined with group splits")
+    if (
+        splits_payload is not None
+        and splits_payload.splits
+        and ((allocations_payload is not None and allocations_payload) or (allocations_payload is None and transaction.allocations))
+    ):
+        raise ValueError("Payment allocations cannot be combined with group splits")
+
     if splits_payload is not None:
         await split_service.replace_splits(session, transaction, splits_payload, user_id)
 
+    if allocations_payload is not None:
+        await allocation_service.replace_allocations(session, transaction, allocations_payload, user_id)
+
     await session.commit()
-    await session.refresh(transaction, ["splits"])
+    await session.refresh(transaction, ["splits", "allocations"])
     return transaction
 
 
@@ -1373,14 +1529,19 @@ async def bulk_add_to_group(
             Transaction.id.in_(transaction_ids),
             Transaction.workspace_id == workspace_id,
         )
-        .options(selectinload(Transaction.splits))
+        .options(selectinload(Transaction.splits), selectinload(Transaction.allocations))
     )
     txs = txs_result.scalars().all()
 
     updated = 0
     skipped = 0
     for tx in txs:
-        if tx.transfer_pair_id is not None or tx.splits:
+        if (
+            tx.transfer_pair_id is not None
+            or tx.splits
+            or tx.allocations
+            or await allocation_service.get_counterpart_allocation(session, tx.id) is not None
+        ):
             skipped += 1
             continue
         await split_service.replace_splits(session, tx, payload, user_id)
@@ -1405,6 +1566,9 @@ async def toggle_ignore_transaction(
     transaction = await get_transaction(session, transaction_id, workspace_id)
     if not transaction:
         return None
+    await allocation_service.ensure_not_allocation_counterpart(
+        session, transaction.id, action="ignored or restored"
+    )
     transaction.is_ignored = not transaction.is_ignored
     await session.commit()
     await session.refresh(transaction)
@@ -1419,6 +1583,10 @@ async def delete_transaction(
     transaction = await get_transaction(session, transaction_id, workspace_id)
     if not transaction:
         return False
+
+    await allocation_service.ensure_not_allocation_counterpart(
+        session, transaction.id, action="deleted"
+    )
 
     # Clean up attachment files from storage before ORM cascade deletes DB records
     from app.services.attachment_service import cleanup_attachment_files
@@ -1438,10 +1606,23 @@ async def delete_transaction(
         if paired_tx:
             tx_ids_to_cleanup.append(paired_tx.id)
 
+    generated_counterpart_ids = [
+        allocation.counterpart_transaction_id
+        for allocation in transaction.allocations
+        if allocation.counterpart_created and allocation.counterpart_transaction_id is not None
+    ]
+    tx_ids_to_cleanup.extend(generated_counterpart_ids)
+
     await cleanup_attachment_files(session, tx_ids_to_cleanup)
 
     if paired_tx:
         await session.delete(paired_tx)
+    if generated_counterpart_ids:
+        result = await session.execute(
+            select(Transaction).where(Transaction.id.in_(generated_counterpart_ids))
+        )
+        for generated in result.scalars().all():
+            await session.delete(generated)
     await session.delete(transaction)
     await session.commit()
     return True

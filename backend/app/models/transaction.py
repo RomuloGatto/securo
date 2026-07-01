@@ -15,6 +15,7 @@ if TYPE_CHECKING:
     from app.models.credit_card_bill import CreditCardBill
     from app.models.import_log import ImportLog
     from app.models.payee import Payee
+    from app.models.transaction_allocation import TransactionAllocation
     from app.models.transaction_attachment import TransactionAttachment
     from app.models.transaction_split import TransactionSplit
 
@@ -91,6 +92,11 @@ class Transaction(Base):
     )
     splits: Mapped[list["TransactionSplit"]] = relationship(
         back_populates="transaction", cascade="all, delete-orphan"
+    )
+    allocations: Mapped[list["TransactionAllocation"]] = relationship(
+        back_populates="transaction",
+        cascade="all, delete-orphan",
+        foreign_keys="TransactionAllocation.transaction_id",
     )
 
 

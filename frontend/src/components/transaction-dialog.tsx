@@ -38,11 +38,15 @@ import { CategorySelect } from '@/components/category-select'
 import { TransactionAttachments } from '@/components/transaction-attachments'
 import type { AttachmentPreview } from '@/components/transaction-attachments'
 import { TransactionSplitsSection } from '@/components/transaction-splits-section'
+import { TransactionPaymentAllocationsSection } from '@/components/transaction-payment-allocations-section'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
-import type { Transaction, RecurringTransaction, TransactionSplitsInput, CategoryGroup, Category, Rule, RuleCondition } from '@/types'
+import type { Transaction, RecurringTransaction, TransactionSplitsInput, TransactionAllocationInput, CategoryGroup, Category, Rule, RuleCondition } from '@/types'
 import { toast } from 'sonner'
 
 export type SaveAction = 'save' | 'saveAndNew' | 'saveAndDuplicate'
+
+type TransactionSavePayload = Partial<Transaction> & { allocations?: TransactionAllocationInput[] | null }
+type DialogAccount = { id: string; name: string; display_name?: string | null; type?: string; currency?: string }
 
 export function extractApiError(error: unknown): string {
   if (
@@ -104,9 +108,9 @@ export function TransactionDialog({
   transaction: Transaction | null
   categories: Category[]
   categoryGroups: CategoryGroup[]
-  accounts: { id: string; name: string; type?: string }[]
+  accounts: DialogAccount[]
   recurringMatch?: RecurringTransaction
-  onSave: (data: Partial<Transaction>, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
+  onSave: (data: TransactionSavePayload, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
   onDelete?: () => void
   onUnlinkTransfer?: (pairId: string) => void
   onIgnoreChanged?: () => void
@@ -320,9 +324,9 @@ function TransactionForm({
   duplicateDraft: Partial<Transaction> | null
   categories: Category[]
   categoryGroups: CategoryGroup[]
-  accounts: { id: string; name: string; type?: string }[]
+  accounts: DialogAccount[]
   recurringMatch?: RecurringTransaction
-  onSave: (data: Partial<Transaction>, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
+  onSave: (data: TransactionSavePayload, recurringData?: { frequency: string; end_date?: string }, pendingFiles?: File[], action?: SaveAction) => void
   onDelete?: () => void
   onUnlinkTransfer?: (pairId: string) => void
   onIgnoreChanged?: () => void
@@ -396,6 +400,8 @@ function TransactionForm({
     const existing = (seed as Transaction | null | undefined)?.splits
     return !!(existing && existing.length > 0)
   })
+  const [allocationsValid, setAllocationsValid] = useState(true)
+  const [allocations, setAllocations] = useState<TransactionAllocationInput[] | null | undefined>(undefined)
   const isCreating = !transaction
   const showConversion = currency !== userCurrency && !isSynced
   // Privacy mode hides monetary values across the app, but the edit modal
@@ -616,6 +622,9 @@ function TransactionForm({
           : hadInitialSplits
             ? { splits: { share_type: 'equal', splits: [] } }
             : {}
+        const allocationsPayload: { allocations?: TransactionAllocationInput[] | null } = allocations !== undefined
+          ? { allocations: allocations ?? [] }
+          : {}
         const txData = isSynced
           ? {
               category_id: categoryId || null,
@@ -624,7 +633,8 @@ function TransactionForm({
               is_ignored: isIgnored,
               ...overridePayload,
               ...splitsPayload,
-            } as Partial<Transaction>
+              ...allocationsPayload,
+            } as TransactionSavePayload
           : {
               description,
               amount: parseFloat(amount),
@@ -639,7 +649,8 @@ function TransactionForm({
               ...fxFields,
               ...overridePayload,
               ...splitsPayload,
-            } as Partial<Transaction>
+              ...allocationsPayload,
+            } as TransactionSavePayload
         const recurringData = isCreating && isRecurring
           ? { frequency, end_date: endDate || undefined }
           : undefined
@@ -941,6 +952,26 @@ function TransactionForm({
         />
       )}
 
+      {transaction?.source !== 'settlement' && (
+        <TransactionPaymentAllocationsSection
+          transaction={transaction}
+          amount={parseFloat(amount) || 0}
+          currency={currency}
+          type={type}
+          categoryId={categoryId}
+          accountId={accountId}
+          categories={categories}
+          categoryGroups={categoryGroups}
+          accounts={accounts}
+          sharedSplitEnabled={!!splits && splits.splits.length > 0}
+          hideAmounts={hideAmounts}
+          maskValue={MASK}
+          value={allocations}
+          onChange={setAllocations}
+          onValidityChange={setAllocationsValid}
+        />
+      )}
+
       {!isCreating && transaction ? (
         <TransactionAttachments
           transactionId={transaction.id}
@@ -1069,7 +1100,7 @@ function TransactionForm({
             <div className="inline-flex">
               <Button
                 type="submit"
-                disabled={loading || !splitsValid}
+                disabled={loading || !splitsValid || !allocationsValid}
                 className="rounded-r-none whitespace-nowrap"
               >
                 {loading ? t('common.loading') : t('common.save')}
@@ -1078,7 +1109,7 @@ function TransactionForm({
                 <DropdownMenuTrigger asChild>
                   <Button
                     type="button"
-                    disabled={loading || !splitsValid}
+                    disabled={loading || !splitsValid || !allocationsValid}
                     aria-label={t('transactions.moreSaveOptions')}
                     className="rounded-l-none border-l border-l-primary-foreground/20 px-2 has-[>svg]:px-2"
                   >
@@ -1096,7 +1127,7 @@ function TransactionForm({
               </DropdownMenu>
             </div>
           ) : (
-            <Button type="submit" disabled={loading || !splitsValid} className="whitespace-nowrap">
+            <Button type="submit" disabled={loading || !splitsValid || !allocationsValid} className="whitespace-nowrap">
               {loading ? t('common.loading') : t('common.save')}
             </Button>
           )}

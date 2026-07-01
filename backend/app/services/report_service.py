@@ -12,6 +12,7 @@ from app.models.account import Account
 from app.models.asset import Asset
 from app.models.asset_value import AssetValue
 from app.models.transaction import Transaction
+from app.models.transaction_allocation import TransactionAllocation
 from app.models.category import Category
 from app.models.user import User
 from app.services._query_filters import (
@@ -22,6 +23,10 @@ from app.services._query_filters import (
 )
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.account_service import get_account_name
+from app.services.allocation_reporting_service import (
+    allocation_category_filter,
+    proportional_allocation_amount_expr,
+)
 from app.services.fx_rate_service import convert
 from app.schemas.report import (
     CategoryTrendItem,
@@ -415,6 +420,41 @@ async def get_income_expenses_report(
         expenses = abs(float(row[2] or 0))
         data_map[row[0]] = (income, expenses)
 
+    allocation_amount_expr = proportional_allocation_amount_expr(
+        Transaction.amount,
+        Transaction.amount_primary,
+    )
+    allocation_result = await session.execute(
+        select(
+            label_expr,
+            Transaction.type,
+            func.sum(allocation_amount_expr),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            report_date >= start,
+            report_date <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(label_expr, Transaction.type)
+    )
+    for period, tx_type, raw_total in allocation_result.all():
+        if not raw_total:
+            continue
+        amount = abs(float(raw_total))
+        period_key = str(period)
+        income, expenses = data_map.get(period_key, (0.0, 0.0))
+        if tx_type == "credit":
+            income += amount
+        else:
+            expenses += amount
+        data_map[period_key] = (income, expenses)
+
     # Subtract non-owner shares of the user's own splits per period — the
     # user shouldn't be charged for the parts they're owed back.
     from sqlalchemy import or_ as _or_, and_ as _and_
@@ -677,6 +717,46 @@ async def get_income_expenses_report(
             "value": amount,
         }
 
+    allocation_cat_result = await session.execute(
+        select(
+            Category.id,
+            Category.name,
+            Category.color,
+            Transaction.type,
+            func.sum(allocation_amount_expr),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .outerjoin(Category, TransactionAllocation.category_id == Category.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            report_date >= start,
+            report_date <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(Category.id, Category.name, Category.color, Transaction.type)
+    )
+    for cat_id, cat_name, cat_color, txn_type, total_amount in allocation_cat_result.all():
+        if not total_amount:
+            continue
+        amount = abs(float(total_amount))
+        if amount <= 0:
+            continue
+        cat_key = str(cat_id) if cat_id else "uncategorized"
+        group = "income" if txn_type == "credit" else "expenses"
+        key = (cat_key, group)
+        if key in comp_map:
+            comp_map[key]["value"] += amount
+        else:
+            comp_map[key] = {
+                "label": cat_name if cat_name else "Uncategorized",
+                "color": cat_color if cat_color else "#6B7280",
+                "value": amount,
+            }
+
     # Subtract non-owner shares of own splits from composition (debit only —
     # owner_split_offset_by_category is debit-only). Keeps the report's
     # composition consistent with summary totals under share-only model.
@@ -781,6 +861,51 @@ async def get_income_expenses_report(
         cat_trend_map[map_key]["total"] += amount
         cat_trend_map[map_key]["periods"][period_label] = (
             cat_trend_map[map_key]["periods"].get(period_label, 0.0) + amount
+        )
+
+    allocation_cat_trend_result = await session.execute(
+        select(
+            label_expr,
+            Category.id,
+            Category.name,
+            Category.color,
+            Transaction.type,
+            func.sum(allocation_amount_expr),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .outerjoin(Category, TransactionAllocation.category_id == Category.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            report_date >= start,
+            report_date <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(label_expr, Category.id, Category.name, Category.color, Transaction.type)
+    )
+    for period_label, cat_id, cat_name, cat_color, txn_type, total_amount in allocation_cat_trend_result.all():
+        if not total_amount:
+            continue
+        amount = abs(float(total_amount))
+        if amount <= 0:
+            continue
+        cat_key = str(cat_id) if cat_id else "uncategorized"
+        group = "income" if txn_type == "credit" else "expenses"
+        map_key = (cat_key, group)
+        if map_key not in cat_trend_map:
+            cat_trend_map[map_key] = {
+                "label": cat_name if cat_name else "Uncategorized",
+                "color": cat_color if cat_color else "#6B7280",
+                "total": 0.0,
+                "periods": {},
+            }
+        period_key = str(period_label)
+        cat_trend_map[map_key]["total"] += amount
+        cat_trend_map[map_key]["periods"][period_key] = (
+            cat_trend_map[map_key]["periods"].get(period_key, 0.0) + amount
         )
 
     # Subtract non-owner shares of own splits per (period, category) — keeps
@@ -1033,8 +1158,24 @@ async def _get_baseline_projection(
         )
     )
     earliest_date = earliest_result.scalar_one_or_none()
-    if earliest_date is None:
+    allocation_earliest_result = await session.execute(
+        select(func.min(Transaction.date))
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            Transaction.date <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+    )
+    allocation_earliest_date = allocation_earliest_result.scalar_one_or_none()
+    earliest_candidates = [d for d in (earliest_date, allocation_earliest_date) if d is not None]
+    if not earliest_candidates:
         return [], 0
+    earliest_date = min(earliest_candidates)
     window_start = max(earliest_date, cap_start)
 
     rows = await session.execute(
@@ -1068,6 +1209,33 @@ async def _get_baseline_projection(
             total_inflow_primary += abs(amount)
         else:
             total_outflow_primary += abs(amount)
+
+    allocation_rows = await session.execute(
+        select(
+            Transaction.type,
+            func.sum(proportional_allocation_amount_expr(Transaction.amount, Transaction.amount_primary)),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            Transaction.date >= window_start,
+            Transaction.date <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(Transaction.type)
+    )
+    for tx_type, amount in allocation_rows.all():
+        amount = abs(float(amount or 0))
+        if amount == 0:
+            continue
+        if tx_type == "credit":
+            total_inflow_primary += amount
+        else:
+            total_outflow_primary += amount
 
     lookback_days = max((today - window_start).days, 1)
     daily_inflow = total_inflow_primary / lookback_days
@@ -1200,6 +1368,31 @@ async def get_cash_flow_report(
             continue
         _add_flow(flow_date, abs(amount_primary), tx_type == "credit")
 
+    past_allocation_result = await session.execute(
+        select(
+            flow_date_col,
+            Transaction.type,
+            func.sum(proportional_allocation_amount_expr(Transaction.amount, Transaction.amount_primary)),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            flow_date_col > chart_start,
+            flow_date_col <= today,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(flow_date_col, Transaction.type)
+    )
+    for flow_date, tx_type, amount_primary in past_allocation_result.all():
+        amount_primary = float(amount_primary or 0)
+        if amount_primary == 0:
+            continue
+        _add_flow(flow_date, abs(amount_primary), tx_type == "credit")
+
     # 1b. Future booked transactions whose cash impact is past today.
     booked_result = await session.execute(
         select(
@@ -1226,6 +1419,31 @@ async def get_cash_flow_report(
             amount_primary = float(amt_primary)
         else:
             amount_primary = await _to_primary(Decimal(str(amt or 0)), ccy)
+        if amount_primary == 0:
+            continue
+        _add_flow(flow_date, abs(amount_primary), tx_type == "credit")
+
+    booked_allocation_result = await session.execute(
+        select(
+            flow_date_col,
+            Transaction.type,
+            func.sum(proportional_allocation_amount_expr(Transaction.amount, Transaction.amount_primary)),
+        )
+        .select_from(TransactionAllocation)
+        .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+        .join(Account, Transaction.account_id == Account.id)
+        .where(
+            Transaction.workspace_id == workspace_id,
+            Account.is_closed == False,
+            flow_date_col > today,
+            flow_date_col <= end,
+            allocation_category_filter(),
+            *acct_filter,
+        )
+        .group_by(flow_date_col, Transaction.type)
+    )
+    for flow_date, tx_type, amount_primary in booked_allocation_result.all():
+        amount_primary = float(amount_primary or 0)
         if amount_primary == 0:
             continue
         _add_flow(flow_date, abs(amount_primary), tx_type == "credit")
@@ -1260,6 +1478,35 @@ async def get_cash_flow_report(
                 amount_primary = float(amt_primary)
             else:
                 amount_primary = await _to_primary(Decimal(str(amt or 0)), ccy)
+            if amount_primary == 0:
+                continue
+            if tx_type == "debit":
+                current_balance += abs(amount_primary)
+            else:
+                current_balance -= abs(amount_primary)
+
+        pending_cc_allocations = await session.execute(
+            select(
+                Transaction.type,
+                func.sum(proportional_allocation_amount_expr(Transaction.amount, Transaction.amount_primary)),
+            )
+            .select_from(TransactionAllocation)
+            .join(Transaction, TransactionAllocation.transaction_id == Transaction.id)
+            .join(Account, Transaction.account_id == Account.id)
+            .where(
+                Transaction.workspace_id == workspace_id,
+                Account.is_closed == False,
+                Account.type == "credit_card",
+                Transaction.date <= today,
+                Transaction.effective_date > today,
+                Transaction.effective_date <= end,
+                allocation_category_filter(),
+                *acct_filter,
+            )
+            .group_by(Transaction.type)
+        )
+        for tx_type, amount_primary in pending_cc_allocations.all():
+            amount_primary = float(amount_primary or 0)
             if amount_primary == 0:
                 continue
             if tx_type == "debit":
