@@ -327,8 +327,18 @@ export const connections = {
     })
     return data
   },
-  handleCallback: async (code: string, provider: string, state?: string): Promise<BankConnection> => {
-    const { data } = await api.post('/connections/oauth/callback', { code, provider, state })
+  handleCallback: async (
+    code: string,
+    provider: string,
+    state?: string,
+    settings?: Pick<ConnectionSettings, 'sync_assets'>,
+  ): Promise<BankConnection> => {
+    const { data } = await api.post('/connections/oauth/callback', {
+      code,
+      provider,
+      state,
+      ...settings,
+    })
     return data
   },
   getReauthUrl: async (connectionId: string): Promise<string> => {

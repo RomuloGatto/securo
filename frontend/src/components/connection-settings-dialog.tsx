@@ -34,12 +34,14 @@ export function ConnectionSettingsDialog({
   const [displayName, setDisplayName] = useState('')
   const [payeeSource, setPayeeSource] = useState<PayeeSource>('auto')
   const [importPending, setImportPending] = useState(true)
+  const [syncAssets, setSyncAssets] = useState(true)
 
   useEffect(() => {
     if (connection) {
       setDisplayName(connection.display_name ?? '')
       setPayeeSource(connection.settings?.payee_source ?? 'auto')
       setImportPending(connection.settings?.import_pending ?? true)
+      setSyncAssets(connection.settings?.sync_assets ?? true)
     }
   }, [connection])
 
@@ -49,6 +51,7 @@ export function ConnectionSettingsDialog({
         display_name: displayName.trim() || null,
         payee_source: payeeSource,
         import_pending: importPending,
+        sync_assets: syncAssets,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connections'] })
@@ -98,6 +101,19 @@ export function ConnectionSettingsDialog({
               checked={importPending}
               onChange={(e) => setImportPending(e.target.checked)}
               className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
+            />
+          </div>
+          <div className="flex items-start justify-between gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="sync-assets">{t('connections.syncAssets')}</Label>
+              <p className="text-[11px] text-muted-foreground">{t('connections.syncAssetsHint')}</p>
+            </div>
+            <input
+              id="sync-assets"
+              type="checkbox"
+              checked={syncAssets}
+              onChange={(e) => setSyncAssets(e.target.checked)}
+              className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
           </div>
         </div>
