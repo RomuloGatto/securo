@@ -365,12 +365,13 @@ export default function TransactionsPage() {
   })
 
   const calendarMonth = steppedMonth
+  const calendarAccountIds = filterAccountIds.length === 1 ? filterAccountIds : []
   const { data: calendarData, isLoading: calendarLoading } = useQuery({
-    queryKey: ['transactions', 'calendar', calendarMonth, effectiveAccountIds],
-    enabled: !noAccounts && viewMode === 'calendar',
+    queryKey: ['transactions', 'calendar', calendarMonth, calendarAccountIds],
+    enabled: viewMode === 'calendar',
     queryFn: () => transactions.calendar({
       month: `${calendarMonth}-01`,
-      account_ids: effectiveAccountIds.length > 0 ? effectiveAccountIds : undefined,
+      account_ids: calendarAccountIds.length === 1 ? calendarAccountIds : undefined,
     }),
   })
 
@@ -1213,7 +1214,10 @@ export default function TransactionsPage() {
                   variant={viewMode === 'calendar' ? 'secondary' : 'ghost'}
                   size="sm"
                   className="h-8 gap-1.5 px-2.5"
-                  onClick={() => setViewMode('calendar')}
+                  onClick={() => {
+                    if (filterAccountIds.length > 1) setFilterAccountIds([])
+                    setViewMode('calendar')
+                  }}
                 >
                   <CalendarDays size={14} />
                   {t('transactions.calendarView')}
@@ -1304,7 +1308,8 @@ export default function TransactionsPage() {
           setSearchQuery(text)
         }}
         filterAccountIds={filterAccountIds}
-        onAccountIdsChange={(v) => { setFilterAccountIds(v); setPage(1) }}
+        onAccountIdsChange={(v) => { setFilterAccountIds(viewMode === 'calendar' ? v.slice(0, 1) : v); setPage(1) }}
+        accountSelectionMode={viewMode === 'calendar' ? 'single' : 'multiple'}
         filterCategoryIds={filterCategoryIds}
         onCategoryIdsChange={(v) => { setFilterCategoryIds(v); setPage(1) }}
         filterUncategorized={filterUncategorized}
