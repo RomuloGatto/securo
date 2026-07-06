@@ -43,6 +43,8 @@ import {
 import {
   AreaChart,
   Area,
+  Line,
+  LineChart as RechartsLineChart,
   XAxis,
   YAxis,
   Tooltip as RechartsTooltip,
@@ -1065,7 +1067,7 @@ export default function AssetsPage() {
         />
       ) : (
       <>
-      {/* Portfolio Stacked Area Chart */}
+      {/* Portfolio value chart */}
       {portfolioData && portfolioData.trend.length > 0 && (
         <PortfolioChart
           data={portfolioData}
@@ -1820,15 +1822,7 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
       </div>
       <div className="h-56">
         <ResponsiveContainer width="100%" height="100%">
-          <AreaChart data={displayTrend} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
-            <defs>
-              {sortedSeries.map(s => (
-                <linearGradient key={s.key} id={`portfolio-grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor={s.color} stopOpacity={0.5} />
-                  <stop offset="100%" stopColor={s.color} stopOpacity={0.1} />
-                </linearGradient>
-              ))}
-            </defs>
+          <RechartsLineChart data={displayTrend} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="var(--border)" strokeOpacity={0.5} />
             <XAxis
               dataKey="date"
@@ -1878,23 +1872,23 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
                 )
               }}
             />
-            {/* Stacked areas — one colored band per series */}
+            {/* Unstacked curves: each wallet/asset line is plotted at its own value.
+                Stacked areas make small wallets track the portfolio total, which
+                visually recreates issue #341 even when tooltip values are correct. */}
             {sortedSeries.map(s => (
-              <Area
+              <Line
                 key={s.key}
                 type="monotone"
                 dataKey={s.key}
-                stackId="portfolio"
                 stroke={s.color}
-                strokeWidth={1}
-                fill={`url(#portfolio-grad-${s.key})`}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
                 dot={false}
                 activeDot={{ r: 3, strokeWidth: 1.5, fill: 'var(--card)' }}
               />
             ))}
-            {/* Hidden total for tooltip */}
-            <Area dataKey="_total" stroke="none" fill="none" dot={false} activeDot={false} />
-          </AreaChart>
+          </RechartsLineChart>
         </ResponsiveContainer>
       </div>
       {/* Legend */}
