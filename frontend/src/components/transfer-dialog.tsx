@@ -22,6 +22,7 @@ export function TransferDialog({
   onSave,
   loading,
   defaultFromAccountId,
+  defaultDate,
 }: {
   open: boolean
   onClose: () => void
@@ -37,12 +38,13 @@ export function TransferDialog({
   }) => void
   loading: boolean
   defaultFromAccountId?: string
+  defaultDate?: string
 }) {
   const { t } = useTranslation()
   const [fromAccountId, setFromAccountId] = useState(defaultFromAccountId || (accounts[0]?.id ?? ''))
   const [toAccountId, setToAccountId] = useState('')
   const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().split('T')[0])
+  const [date, setDate] = useState(defaultDate || new Date().toISOString().split('T')[0])
   const [description, setDescription] = useState('')
   const [notes, setNotes] = useState('')
   const [fxRate, setFxRate] = useState('')
@@ -53,12 +55,12 @@ export function TransferDialog({
     setFromAccountId(defaultFromAccountId || (accounts[0]?.id ?? ''))
     setToAccountId('')
     setAmount('')
-    setDate(new Date().toISOString().split('T')[0])
+    setDate(defaultDate || new Date().toISOString().split('T')[0])
     setDescription('')
     setNotes('')
     setFxRate('')
     setConvertedAmount('')
-  }, [defaultFromAccountId, accounts])
+  }, [defaultFromAccountId, defaultDate, accounts])
 
   useEffect(() => {
     if (open) resetForm()

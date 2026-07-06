@@ -482,7 +482,22 @@
     },
     "bulkAddTags": "Aggiungi tag",
     "addTagsPlaceholder": "#tag…",
-    "clearOverride": "Rimuovi override"
+    "clearOverride": "Rimuovi override",
+    "listView": "List",
+    "calendarView": "Calendar",
+    "calendar": "Calendar",
+    "calendarOneAccount": "1 account",
+    "calendarAccountCount": "{{count}} accounts",
+    "calendarAllAccounts": "All accounts",
+    "calendarEndBalance": "End balance",
+    "calendarItemCount": "{{count}} item",
+    "calendarItemCount_plural": "{{count}} items",
+    "calendarProjectedCount": "{{count}} projected",
+    "calendarProjected": "Projected",
+    "calendarAddIncome": "Add income",
+    "calendarAddExpense": "Add expense",
+    "calendarSelectedDay": "Selected day",
+    "calendarNoItems": "No transactions on this day"
   },
   "accounts": {
     "title": "Conti",

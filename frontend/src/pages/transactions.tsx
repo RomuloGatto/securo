@@ -35,7 +35,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, Check, Copy, Download, HelpCircle, Info, MoreHorizontal, Paperclip, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
+import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, CalendarDays, Check, Copy, Download, HelpCircle, Info, List, MoreHorizontal, Paperclip, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -55,6 +55,7 @@ import { TransferDialog } from '@/components/transfer-dialog'
 import { LinkTransferDialog } from '@/components/link-transfer-dialog'
 import { BulkAddToGroupDialog, type BulkAddToGroupSubmission } from '@/components/bulk-add-to-group-dialog'
 import { TransactionsFilterBar } from '@/components/transactions-filter-bar'
+import { TransactionCalendarView } from '@/components/transaction-calendar-view'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -136,6 +137,8 @@ export default function TransactionsPage() {
     useState<PendingTransferCategoryUpdate | null>(null)
   const [formResetKey, setFormResetKey] = useState(0)
   const [duplicateDraft, setDuplicateDraft] = useState<Partial<Transaction> | null>(null)
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>('list')
+  const [transferDefaultDate, setTransferDefaultDate] = useState<string | undefined>(undefined)
   const [filterPayee, setFilterPayee] = useState<string>(searchParams.get('payee_id') ?? '')
   const [filterGroupId, setFilterGroupId] = useState<string>(searchParams.get('group_id') ?? '')
   const [filterType, setFilterType] = useState<string>(searchParams.get('type') ?? '')
@@ -292,6 +295,14 @@ export default function TransactionsPage() {
     setBulkCategory('')
   }, [page, filterAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterType, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery])
 
+  useEffect(() => {
+    if (viewMode === 'calendar') {
+      setSelectedIds(new Set())
+      setLastSelectedId(null)
+      setBulkCategory('')
+    }
+  }, [viewMode])
+
   // Reset bulk category when selection changes so the same category can be re-applied
   useEffect(() => {
     setBulkCategory('')
@@ -351,6 +362,16 @@ export default function TransactionsPage() {
         tags: tagFilters.length > 0 ? tagFilters : undefined,
         ...grid.apiSort,
       }),
+  })
+
+  const calendarMonth = steppedMonth
+  const { data: calendarData, isLoading: calendarLoading } = useQuery({
+    queryKey: ['transactions', 'calendar', calendarMonth, effectiveAccountIds],
+    enabled: !noAccounts && viewMode === 'calendar',
+    queryFn: () => transactions.calendar({
+      month: `${calendarMonth}-01`,
+      account_ids: effectiveAccountIds.length > 0 ? effectiveAccountIds : undefined,
+    }),
   })
 
   // Publish the active filters + result count to the global chat panel.
@@ -779,6 +800,39 @@ export default function TransactionsPage() {
     setDialogOpen(true)
   }
 
+  const handleCalendarAddTransaction = (date: string, type: 'credit' | 'debit', accountId?: string | null) => {
+    const selectedAccount = accountsList?.find((account) => account.id === accountId)
+      ?? (effectiveAccountIds.length === 1
+        ? accountsList?.find((account) => account.id === effectiveAccountIds[0])
+        : undefined)
+    const draft: Partial<Transaction> = {
+      date,
+      type,
+      account_id: selectedAccount?.id,
+      currency: selectedAccount?.currency ?? userCurrency,
+    }
+    setEditingTx(null)
+    setDuplicateDraft(draft)
+    setFormResetKey(k => k + 1)
+    setDialogOpen(true)
+  }
+
+  const handleCalendarTransfer = (date: string) => {
+    setTransferDefaultDate(date)
+    setTransferDialogOpen(true)
+  }
+
+  const handleOpenCalendarTransaction = async (id: string) => {
+    try {
+      const tx = await transactions.get(id)
+      setEditingTx(tx)
+      setDuplicateDraft(null)
+      setDialogOpen(true)
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }
+
   const handleExport = async () => {
     setExporting(true)
     try {
@@ -1145,7 +1199,27 @@ export default function TransactionsPage() {
 
             {/* Secondary actions: inline labelled buttons on desktop. */}
             <div className="hidden sm:contents">
-              <TransactionsColumnPicker state={grid} />
+              <div className="inline-flex rounded-lg border border-border bg-card p-0.5">
+                <Button
+                  variant={viewMode === 'list' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-8 gap-1.5 px-2.5"
+                  onClick={() => setViewMode('list')}
+                >
+                  <List size={14} />
+                  {t('transactions.listView')}
+                </Button>
+                <Button
+                  variant={viewMode === 'calendar' ? 'secondary' : 'ghost'}
+                  size="sm"
+                  className="h-8 gap-1.5 px-2.5"
+                  onClick={() => setViewMode('calendar')}
+                >
+                  <CalendarDays size={14} />
+                  {t('transactions.calendarView')}
+                </Button>
+              </div>
+              {viewMode === 'list' && <TransactionsColumnPicker state={grid} />}
               <Button variant="outline" disabled={exporting} onClick={handleExport}>
                 <Download size={16} className="mr-1.5" />
                 {exporting
@@ -1309,6 +1383,21 @@ export default function TransactionsPage() {
         </div>
       )}
 
+      {viewMode === 'calendar' ? (
+        <TransactionCalendarView
+          calendar={calendarData}
+          isLoading={calendarLoading}
+          accounts={accountsList ?? []}
+          locale={locale}
+          dateLocale={dateLocale}
+          mask={mask}
+          canWrite={canWrite}
+          onAddTransaction={handleCalendarAddTransaction}
+          onTransfer={handleCalendarTransfer}
+          onOpenTransaction={handleOpenCalendarTransaction}
+        />
+      ) : (
+        <>
       {/* Table */}
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden mb-4">
         {isLoading ? (
@@ -1486,6 +1575,8 @@ export default function TransactionsPage() {
             </Select>
           </div>
         </div>
+      )}
+        </>
       )}
 
       {/* Bulk Action Bar — aligned with the main content area: clears the
@@ -1675,10 +1766,11 @@ export default function TransactionsPage() {
       {/* Transfer Dialog */}
       <TransferDialog
         open={transferDialogOpen}
-        onClose={() => setTransferDialogOpen(false)}
+        onClose={() => { setTransferDialogOpen(false); setTransferDefaultDate(undefined) }}
         accounts={accountsList ?? []}
         onSave={(data) => transferMutation.mutate(data)}
         loading={transferMutation.isPending}
+        defaultDate={transferDefaultDate}
       />
 
       {/* Add/Edit Dialog */}
