@@ -115,7 +115,7 @@ export function TransactionCalendarView({
   if (!calendar) return null
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr),360px] mb-4">
+    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr),minmax(320px,360px)] mb-4">
       <section className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
         <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -215,13 +215,20 @@ function DayCell({
   const { t } = useTranslation()
   const primaryAccountId = day.items.find((item) => item.account_id)?.account_id
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
       onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onSelect()
+        }
+      }}
       className={cn(
         'relative min-h-36 border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
         !day.in_month && 'bg-muted/20 text-muted-foreground',
-        selected && 'z-10 ring-2 ring-primary bg-primary/5',
+        selected && 'z-10 bg-primary/5 ring-2 ring-primary/70 dark:bg-primary/10',
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -242,7 +249,7 @@ function DayCell({
         </p>
         <p className={cn(
           'text-sm font-bold tabular-nums',
-          day.ending_balance < 0 ? 'text-rose-500' : 'text-emerald-600',
+          day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
         )}>
           {mask(compactCurrency(day.ending_balance, currency, locale))}
         </p>
@@ -256,7 +263,7 @@ function DayCell({
       )}
 
       {selected && canWrite && (
-        <div className="absolute inset-x-3 bottom-3 grid grid-cols-3 gap-1.5">
+        <div className="absolute inset-x-3 bottom-3 grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/95 p-1 shadow-sm backdrop-blur dark:bg-background/90">
           <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
             <Plus size={14} />
           </QuickAction>
@@ -268,7 +275,7 @@ function DayCell({
           </QuickAction>
         </div>
       )}
-    </button>
+    </div>
   )
 }
 
@@ -284,30 +291,23 @@ function QuickAction({
   children: ReactNode
 }) {
   return (
-    <span
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       title={label}
+      aria-label={label}
       onClick={(event) => {
         event.stopPropagation()
         onClick()
       }}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault()
-          event.stopPropagation()
-          onClick()
-        }
-      }}
       className={cn(
-        'h-8 rounded-md border text-xs font-semibold inline-flex items-center justify-center transition-colors',
-        tone === 'income' && 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100',
-        tone === 'expense' && 'border-rose-200 bg-rose-50 text-rose-600 hover:bg-rose-100',
-        tone === 'transfer' && 'border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100',
+        'inline-flex h-7 items-center justify-center rounded-md border border-transparent text-xs font-semibold transition-colors hover:border-border hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40',
+        tone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
+        tone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
+        tone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
       )}
     >
       {children}
-    </span>
+    </button>
   )
 }
 
@@ -315,22 +315,39 @@ function CalendarBadges({ day }: { day: TransactionCalendarDay }) {
   const { t } = useTranslation()
   return (
     <div className="flex flex-wrap justify-end gap-1">
-      {day.has_income && <BadgeDot className="bg-emerald-100 text-emerald-700" label={t('transactions.summaryIncome')} />}
-      {day.has_expense && <BadgeDot className="bg-rose-100 text-rose-600" label={t('transactions.summaryExpenses')} />}
+      {day.has_income && <BadgeDot tone="income" label={t('transactions.summaryIncome')} />}
+      {day.has_expense && <BadgeDot tone="expense" label={t('transactions.summaryExpenses')} />}
       {day.has_transfer && (
-        <span title={t('transactions.transfer')} className="inline-flex size-6 items-center justify-center rounded-full bg-blue-100 text-blue-600">
-          <ArrowLeftRight size={13} />
-        </span>
+        <BadgeDot tone="transfer" label={t('transactions.transfer')}>
+          <ArrowLeftRight size={12} />
+        </BadgeDot>
       )}
-      {day.projected_count > 0 && <BadgeDot className="bg-violet-100 text-violet-700" label={t('transactions.calendarProjected')} />}
+      {day.projected_count > 0 && <BadgeDot tone="projected" label={t('transactions.calendarProjected')} />}
     </div>
   )
 }
 
-function BadgeDot({ className, label }: { className: string; label: string }) {
+function BadgeDot({
+  tone,
+  label,
+  children,
+}: {
+  tone: 'income' | 'expense' | 'transfer' | 'projected'
+  label: string
+  children?: ReactNode
+}) {
   return (
-    <span title={label} className={cn('inline-flex size-6 items-center justify-center rounded-full', className)}>
-      <CircleDot size={13} />
+    <span
+      title={label}
+      className={cn(
+        'inline-flex size-5 items-center justify-center rounded-md border border-border bg-background/80 shadow-sm backdrop-blur',
+        tone === 'income' && 'text-emerald-600 dark:text-emerald-400',
+        tone === 'expense' && 'text-rose-600 dark:text-rose-400',
+        tone === 'transfer' && 'text-sky-600 dark:text-sky-400',
+        tone === 'projected' && 'text-violet-600 dark:text-violet-300',
+      )}
+    >
+      {children ?? <CircleDot size={11} />}
     </span>
   )
 }
@@ -357,7 +374,7 @@ function MobileDayRow({
     <button
       type="button"
       onClick={onSelect}
-      className={cn('w-full px-4 py-3 text-left flex items-center justify-between gap-3', selected && 'bg-primary/5')}
+      className={cn('w-full px-4 py-3 text-left flex items-center justify-between gap-3 transition-colors hover:bg-muted/30', selected && 'bg-primary/5 dark:bg-primary/10')}
     >
       <div>
         <p className="text-sm font-semibold text-foreground">
@@ -368,7 +385,7 @@ function MobileDayRow({
         </p>
       </div>
       <div className="text-right">
-        <p className={cn('text-sm font-bold tabular-nums', day.ending_balance < 0 ? 'text-rose-500' : 'text-emerald-600')}>
+        <p className={cn('text-sm font-bold tabular-nums', day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
           {mask(formatCurrency(day.ending_balance, currency, locale))}
         </p>
         <CalendarBadges day={day} />
@@ -402,7 +419,7 @@ function SelectedDayPanel({
   if (!day) return null
   const primaryAccountId = day.items.find((item) => item.account_id)?.account_id
   return (
-    <aside className="bg-card rounded-xl border border-border shadow-sm overflow-hidden xl:sticky xl:top-4 xl:self-start">
+    <aside className="bg-card rounded-xl border border-border shadow-sm overflow-hidden lg:sticky lg:top-4 lg:self-start lg:max-h-[calc(100vh-7rem)] lg:flex lg:flex-col">
       <div className="px-4 py-4 border-b border-border">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('transactions.calendarSelectedDay')}</p>
         <h3 className="text-lg font-bold text-foreground">
@@ -414,26 +431,26 @@ function SelectedDayPanel({
       </div>
 
       <div className="grid grid-cols-3 gap-2 p-4 border-b border-border">
-        <SummaryPill label={t('transactions.summaryIncome')} value={day.income} currency={currency} locale={locale} mask={mask} className="text-emerald-600" />
-        <SummaryPill label={t('transactions.summaryExpenses')} value={day.expense} currency={currency} locale={locale} mask={mask} className="text-rose-500" />
-        <SummaryPill label={t('transactions.transfer')} value={day.transfer_net} currency={currency} locale={locale} mask={mask} className="text-blue-600" />
+        <SummaryPill label={t('transactions.summaryIncome')} value={day.income} currency={currency} locale={locale} mask={mask} className="text-emerald-600 dark:text-emerald-400" />
+        <SummaryPill label={t('transactions.summaryExpenses')} value={day.expense} currency={currency} locale={locale} mask={mask} className="text-rose-600 dark:text-rose-400" />
+        <SummaryPill label={t('transactions.transfer')} value={day.transfer_net} currency={currency} locale={locale} mask={mask} className="text-sky-600 dark:text-sky-400" />
       </div>
 
       {canWrite && (
-        <div className="grid grid-cols-3 gap-2 p-4 border-b border-border">
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} className="gap-1">
-            <Plus size={13} /> {t('transactions.income')}
+        <div className="grid grid-cols-1 gap-2 p-4 border-b border-border sm:grid-cols-3 lg:grid-cols-1">
+          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
+            <Plus size={14} className="text-emerald-600 dark:text-emerald-400" /> {t('transactions.income')}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} className="gap-1">
-            <Minus size={13} /> {t('transactions.expense')}
+          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
+            <Minus size={14} className="text-rose-600 dark:text-rose-400" /> {t('transactions.expense')}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => onTransfer(day.date)} className="gap-1">
-            <ArrowLeftRight size={13} /> {t('transactions.transfer')}
+          <Button size="sm" variant="outline" onClick={() => onTransfer(day.date)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
+            <ArrowLeftRight size={14} className="text-sky-600 dark:text-sky-400" /> {t('transactions.transfer')}
           </Button>
         </div>
       )}
 
-      <div className="divide-y divide-border max-h-[520px] overflow-y-auto">
+      <div className="min-h-0 divide-y divide-border overflow-y-auto lg:flex-1">
         {day.items.length === 0 ? (
           <p className="px-4 py-8 text-sm text-muted-foreground text-center">{t('transactions.calendarNoItems')}</p>
         ) : (
@@ -468,7 +485,7 @@ function SummaryPill({
   className: string
 }) {
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-2 py-2 min-w-0">
+    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-2 py-2 dark:bg-muted/20">
       <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
       <p className={cn('text-xs font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
     </div>
@@ -504,12 +521,12 @@ function CalendarItemRow({
         <div className="flex items-center gap-2 min-w-0">
           <p className="text-sm font-semibold text-foreground truncate">{item.description}</p>
           {item.kind === 'projected' && (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-violet-100 text-violet-700 px-1.5 py-0.5">
+            <span className="shrink-0 rounded-full border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-700 dark:text-violet-300">
               {t('transactions.calendarProjected')}
             </span>
           )}
           {item.is_transfer && (
-            <span className="shrink-0 text-blue-600"><ArrowLeftRight size={13} /></span>
+            <span className="shrink-0 text-sky-600 dark:text-sky-400"><ArrowLeftRight size={13} /></span>
           )}
         </div>
         <p className="text-xs text-muted-foreground truncate">
@@ -517,7 +534,7 @@ function CalendarItemRow({
           {item.category_name ? ` · ${item.category_name}` : ''}
         </p>
       </div>
-      <p className={cn('text-sm font-bold tabular-nums', amount >= 0 ? 'text-emerald-600' : 'text-rose-500')}>
+      <p className={cn('text-sm font-bold tabular-nums', amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
         {mask(`${amount >= 0 ? '+' : '−'}${formatCurrency(Math.abs(item.amount), item.currency, locale)}`)}
       </p>
     </button>
