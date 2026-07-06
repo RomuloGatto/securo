@@ -27,6 +27,8 @@ import {
   Pencil,
   Trash2,
   RefreshCw,
+  RefreshCcwDot,
+  TriangleAlert,
   Unlink,
   Plus,
   Settings,
@@ -359,7 +361,11 @@ export default function AccountsPage() {
                             <p className="text-sm font-semibold text-foreground">{getConnectionName(conn)}</p>
                             <Badge
                               variant={conn.status === 'active' ? 'default' : 'secondary'}
-                              className="text-[10px] px-1.5 py-0 h-4"
+                              className={
+                                conn.status === 'active'
+                                  ? 'text-[10px] px-1.5 py-0 h-4'
+                                  : 'text-[10px] px-1.5 py-0 h-4 border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300'
+                              }
                             >
                               {conn.status}
                             </Badge>
@@ -381,6 +387,24 @@ export default function AccountsPage() {
                           >
                             <Settings size={14} />
                           </Button>
+                          {conn.status !== 'active' && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="relative h-8 w-8 p-0 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+                              onClick={() => handleReconnectClick(conn)}
+                              title={conn.status === 'expired'
+                                ? t('accounts.connectionExpired')
+                                : t('accounts.connectionError')}
+                              aria-label={t('accounts.reconnect')}
+                            >
+                              <RefreshCcwDot size={15} />
+                              <TriangleAlert
+                                size={10}
+                                className="absolute -right-0.5 -top-0.5 rounded-full bg-card text-amber-500"
+                              />
+                            </Button>
+                          )}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -402,27 +426,6 @@ export default function AccountsPage() {
                         </div>
                       )}
                     </div>
-                    {/* Reconnect banner */}
-                    {conn.status !== 'active' && (
-                      <div className="mx-5 mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5">
-                        <span className="text-sm text-amber-800">
-                          {conn.status === 'expired'
-                            ? t('accounts.connectionExpired')
-                            : t('accounts.connectionError')}
-                        </span>
-                        {canWrite && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="border-amber-300 text-amber-700 hover:bg-amber-100 gap-1.5 h-8"
-                            onClick={() => handleReconnectClick(conn)}
-                          >
-                            <RefreshCw size={12} />
-                            {t('accounts.reconnect')}
-                          </Button>
-                        )}
-                      </div>
-                    )}
                     {/* Accounts list */}
                     {connAccounts.length > 0 ? (
                       <div className="divide-y divide-muted">
