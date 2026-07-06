@@ -22,6 +22,7 @@ interface OAuthConnectDialogProps {
   open: boolean
   onClose: () => void
   provider: string
+  supportsAssetSync?: boolean
 }
 
 const LAST_COUNTRY_KEY = 'securo:lastOAuthCountry'
@@ -39,7 +40,7 @@ function countryLabel(code: string): string {
   return REGION_NAMES.of(code) || code
 }
 
-export function OAuthConnectDialog({ open, onClose, provider }: OAuthConnectDialogProps) {
+export function OAuthConnectDialog({ open, onClose, provider, supportsAssetSync = false }: OAuthConnectDialogProps) {
   const { t } = useTranslation()
   const [step, setStep] = useState<'country' | 'bank'>('country')
   const [country, setCountry] = useState<string | null>(null)
@@ -107,7 +108,7 @@ export function OAuthConnectDialog({ open, onClose, provider }: OAuthConnectDial
       const url = await connections.getOAuthUrl(provider, {
         country,
         institution_name: institution.name,
-        sync_assets: syncAssets,
+        ...(supportsAssetSync ? { sync_assets: syncAssets } : {}),
       })
       window.location.assign(url)
     } catch (e) {
@@ -140,7 +141,7 @@ export function OAuthConnectDialog({ open, onClose, provider }: OAuthConnectDial
           </p>
         </DialogHeader>
 
-        {!redirecting && (
+        {!redirecting && supportsAssetSync && (
           <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
             <div className="space-y-1">
               <label htmlFor="oauth-sync-assets" className="text-sm font-medium text-foreground">

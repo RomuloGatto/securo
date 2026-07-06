@@ -21,12 +21,14 @@ interface ConnectionSettingsDialogProps {
   open: boolean
   onClose: () => void
   connection: BankConnection | null
+  supportsAssetSync?: boolean
 }
 
 export function ConnectionSettingsDialog({
   open,
   onClose,
   connection,
+  supportsAssetSync = false,
 }: ConnectionSettingsDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
@@ -51,7 +53,8 @@ export function ConnectionSettingsDialog({
         display_name: displayName.trim() || null,
         payee_source: payeeSource,
         import_pending: importPending,
-        sync_assets: syncAssets,
+        // Only persist asset-sync for connectors that actually import holdings.
+        ...(supportsAssetSync ? { sync_assets: syncAssets } : {}),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['connections'] })
@@ -103,19 +106,21 @@ export function ConnectionSettingsDialog({
               className="h-4 w-4 rounded border-border text-primary focus:ring-primary"
             />
           </div>
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <Label htmlFor="sync-assets">{t('connections.syncAssets')}</Label>
-              <p className="text-[11px] text-muted-foreground">{t('connections.syncAssetsHint')}</p>
+          {supportsAssetSync && (
+            <div className="flex items-start justify-between gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="sync-assets">{t('connections.syncAssets')}</Label>
+                <p className="text-[11px] text-muted-foreground">{t('connections.syncAssetsHint')}</p>
+              </div>
+              <input
+                id="sync-assets"
+                type="checkbox"
+                checked={syncAssets}
+                onChange={(e) => setSyncAssets(e.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+              />
             </div>
-            <input
-              id="sync-assets"
-              type="checkbox"
-              checked={syncAssets}
-              onChange={(e) => setSyncAssets(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-border text-primary focus:ring-primary"
-            />
-          </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

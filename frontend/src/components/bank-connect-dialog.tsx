@@ -21,6 +21,7 @@ interface BankConnectDialogProps {
   reconnectConnectionId?: string
   updateItemId?: string
   provider?: string
+  supportsAssetSync?: boolean
 }
 
 export function BankConnectDialog({
@@ -29,13 +30,15 @@ export function BankConnectDialog({
   reconnectConnectionId,
   updateItemId,
   provider = 'pluggy',
+  supportsAssetSync = false,
 }: BankConnectDialogProps) {
   const { t } = useTranslation()
   const queryClient = useQueryClient()
   const [connectToken, setConnectToken] = useState<string | null>(null)
   const [syncAssets, setSyncAssets] = useState(true)
   const [optionsConfirmed, setOptionsConfirmed] = useState(false)
-  const needsInitialOptions = !reconnectConnectionId
+  // Only prompt for asset-sync when the provider actually imports holdings.
+  const needsInitialOptions = !reconnectConnectionId && supportsAssetSync
 
   useEffect(() => {
     if (!open) {
@@ -71,7 +74,12 @@ export function BankConnectDialog({
       if (reconnectConnectionId) {
         await connections.sync(reconnectConnectionId)
       } else {
-        await connections.handleCallback(data.item.id, provider, undefined, { sync_assets: syncAssets })
+        await connections.handleCallback(
+          data.item.id,
+          provider,
+          undefined,
+          supportsAssetSync ? { sync_assets: syncAssets } : undefined,
+        )
       }
       invalidateFinancialQueries(queryClient)
       queryClient.invalidateQueries({ queryKey: ['connections'] })
