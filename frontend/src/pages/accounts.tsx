@@ -5,6 +5,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import axios from 'axios'
 import { accounts, connections, currencies } from '@/lib/api'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
@@ -86,6 +87,7 @@ export default function AccountsPage() {
   const [closingAccountId, setClosingAccountId] = useState<string | null>(null)
   const [reconnectConnId, setReconnectConnId] = useState<string | null>(null)
   const [reconnectItemId, setReconnectItemId] = useState<string | null>(null)
+  const [tokenReconnectConnection, setTokenReconnectConnection] = useState<BankConnection | null>(null)
 
   const { data: accountsList, isLoading: accountsLoading } = useQuery({
     queryKey: ['accounts'],
@@ -121,6 +123,10 @@ export default function AccountsPage() {
       }
       return
     }
+    if (providerInfo?.flow_type === 'token') {
+      setTokenReconnectConnection(conn)
+      return
+    }
     // Widget flow (Pluggy): re-open the widget with the existing item_id.
     setReconnectConnId(conn.id)
     setReconnectItemId(conn.external_id)
@@ -143,7 +149,14 @@ export default function AccountsPage() {
         toast.info(t('accounts.mergedCount', { count: merged }))
       }
     },
-    onError: () => toast.error(t('accounts.syncError')),
+    onError: (err) => {
+      queryClient.invalidateQueries({ queryKey: ['connections'] })
+      const detail = axios.isAxiosError(err)
+        ? err.response?.data?.detail
+        : null
+      const message = typeof detail === 'string' ? detail : detail?.message
+      toast.error(message || t('accounts.syncError'))
+    },
   })
 
   const disconnectMutation = useMutation({
@@ -632,12 +645,20 @@ export default function AccountsPage() {
         supportsAssetSync={selectedProvider?.supports_asset_sync ?? false}
       />
 
-      {/* Reconnect Dialog */}
+      {/* Reconnect Dialog — widget-based (Pluggy) */}
       <BankConnectDialog
         open={!!reconnectConnId}
         onClose={() => { setReconnectConnId(null); setReconnectItemId(null) }}
         reconnectConnectionId={reconnectConnId ?? undefined}
         updateItemId={reconnectItemId ?? undefined}
+      />
+
+      {/* Reconnect Dialog — paste-a-token flow (SimpleFIN) */}
+      <TokenConnectDialog
+        open={!!tokenReconnectConnection}
+        onClose={() => setTokenReconnectConnection(null)}
+        provider={tokenReconnectConnection?.provider ?? ''}
+        reconnectConnectionId={tokenReconnectConnection?.id}
       />
 
       {/* Connection Settings Dialog */}
