@@ -1401,7 +1401,7 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {viewMode === 'calendar' ? (
+      {viewMode === 'calendar' && (
         <TransactionCalendarView
           calendar={calendarData}
           isLoading={calendarLoading}
@@ -1423,9 +1423,10 @@ export default function TransactionsPage() {
           onTransfer={handleCalendarTransfer}
           onOpenTransaction={handleOpenCalendarTransaction}
         />
-      ) : (
-        <>
+      )}
+
       {/* Table */}
+      {viewMode === 'list' && (
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden mb-4">
         {isLoading ? (
           <div className="p-6 space-y-3">
@@ -1544,9 +1545,10 @@ export default function TransactionsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Pagination */}
-      {data && data.total > 10 && (
+      {viewMode === 'list' && data && data.total > 10 && (
         <div className={`flex flex-col sm:flex-row items-center justify-between gap-4 py-4 ${selectedIds.size > 0 ? 'pb-20' : ''}`}>
           <div className="hidden sm:block w-32" />
           {totalPages > 1 ? (
@@ -1603,9 +1605,6 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
-        </>
-      )}
-
       {/* Bulk Action Bar — aligned with the main content area: clears the
           fixed sidebar on lg+ and matches the page's max-w-7xl + p-6 wrapper
           so the bar visually sits over the transactions list, not the
