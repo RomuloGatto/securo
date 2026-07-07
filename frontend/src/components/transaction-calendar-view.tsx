@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, CalendarDays, Check, ChevronDown, CircleDot, Minus, Plus } from 'lucide-react'
@@ -55,6 +55,8 @@ export function TransactionCalendarView({
   onMonthChange,
   selectedAccountId,
   onAccountScopeChange,
+  selectedDate,
+  onSelectedDateChange,
   onAddTransaction,
   onTransfer,
   onOpenTransaction,
@@ -70,23 +72,22 @@ export function TransactionCalendarView({
   onMonthChange: (yearMonth: string) => void
   selectedAccountId: string | null
   onAccountScopeChange: (accountId: string | null) => void
+  selectedDate: string
+  onSelectedDateChange: (date: string) => void
   onAddTransaction: (date: string, type: 'credit' | 'debit', accountId?: string | null) => void
   onTransfer: (date: string) => void
   onOpenTransaction: (id: string) => void
 }) {
   const { t } = useTranslation()
-  const [selectedDate, setSelectedDate] = useState<string>('')
 
   useEffect(() => {
     if (!calendar?.days.length) return
+    if (selectedDate && calendar.days.some((day) => day.date === selectedDate)) return
     const today = todayIso()
     const inCalendarToday = calendar.days.find((day) => day.date === today)
     const firstInMonth = calendar.days.find((day) => day.in_month)
-    setSelectedDate((prev) => {
-      if (prev && calendar.days.some((day) => day.date === prev)) return prev
-      return (inCalendarToday ?? firstInMonth ?? calendar.days[0]).date
-    })
-  }, [calendar])
+    onSelectedDateChange((inCalendarToday ?? firstInMonth ?? calendar.days[0]).date)
+  }, [calendar, onSelectedDateChange, selectedDate])
 
   const accountLabel = useMemo(() => {
     if (selectedAccountId) {
@@ -176,7 +177,7 @@ export function TransactionCalendarView({
               locale={locale}
               mask={mask}
               canWrite={canWrite}
-              onSelect={() => setSelectedDate(day.date)}
+              onSelect={() => onSelectedDateChange(day.date)}
               onAddTransaction={onAddTransaction}
               onTransfer={onTransfer}
             />
@@ -193,7 +194,7 @@ export function TransactionCalendarView({
               locale={locale}
               dateLocale={dateLocale}
               mask={mask}
-              onSelect={() => setSelectedDate(day.date)}
+              onSelect={() => onSelectedDateChange(day.date)}
             />
           ))}
         </div>
