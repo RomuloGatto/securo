@@ -22,17 +22,6 @@ function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
 }
 
-function compactCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
-type BalanceBounds = { min: number; max: number }
-
 function signedAmount(item: TransactionCalendarItem) {
   return item.type === 'credit' ? Math.abs(item.amount) : -Math.abs(item.amount)
 }
@@ -45,19 +34,16 @@ function chunkCalendarWeeks(days: TransactionCalendarDay[]) {
   return weeks
 }
 
-function getBalanceBounds(days: TransactionCalendarDay[]): BalanceBounds {
+function balanceLinePoints(days: TransactionCalendarDay[]) {
   const balances = days.map((day) => day.ending_balance)
-  if (!balances.length) return { min: 0, max: 0 }
-  return { min: Math.min(...balances), max: Math.max(...balances) }
-}
-
-function balanceLinePoints(days: TransactionCalendarDay[], bounds: BalanceBounds) {
-  const range = bounds.max - bounds.min
+  const min = Math.min(...balances)
+  const max = Math.max(...balances)
+  const range = max - min
   return days.map((day, index) => {
     const x = ((index + 0.5) / days.length) * 100
     const y = range === 0
       ? 54
-      : 78 - ((day.ending_balance - bounds.min) / range) * 48
+      : 76 - ((day.ending_balance - min) / range) * 46
     return { x, y }
   })
 }
@@ -125,7 +111,6 @@ export function TransactionCalendarView({
 
   const selectedDay = calendar?.days.find((day) => day.date === selectedDate)
   const calendarWeeks = useMemo(() => chunkCalendarWeeks(calendar?.days ?? []), [calendar?.days])
-  const balanceBounds = useMemo(() => getBalanceBounds(calendar?.days ?? []), [calendar?.days])
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, index) => {
       const date = new Date(Date.UTC(2024, 0, 7 + index)) // Sunday-start reference week
@@ -197,7 +182,7 @@ export function TransactionCalendarView({
         <div className="hidden md:block">
           {calendarWeeks.map((week, weekIndex) => (
             <div key={week[0]?.date ?? weekIndex} className="relative">
-              <WeekBalanceLine days={week} bounds={balanceBounds} />
+              <WeekBalanceLine days={week} />
               <div className="relative z-10 grid grid-cols-7">
                 {week.map((day) => (
                   <DayCell
@@ -302,9 +287,9 @@ function AccountScopeSelect({
   )
 }
 
-function WeekBalanceLine({ days, bounds }: { days: TransactionCalendarDay[]; bounds: BalanceBounds }) {
+function WeekBalanceLine({ days }: { days: TransactionCalendarDay[] }) {
   if (days.length === 0) return null
-  const points = balanceLinePoints(days, bounds)
+  const points = balanceLinePoints(days)
   const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')
   const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} 100 L ${points[0].x.toFixed(2)} 100 Z`
 
@@ -313,7 +298,7 @@ function WeekBalanceLine({ days, bounds }: { days: TransactionCalendarDay[]; bou
       viewBox="0 0 100 100"
       preserveAspectRatio="none"
       aria-hidden="true"
-      className="pointer-events-none absolute inset-x-0 top-16 bottom-12 z-0 w-full"
+      className="pointer-events-none absolute inset-x-0 top-11 bottom-0 z-0 h-[calc(100%-2.75rem)] w-full"
     >
       <path d={areaPath} className="fill-emerald-500/10 dark:fill-emerald-300/10" />
       <path
@@ -382,19 +367,11 @@ function DayCell({
         <CalendarBadges day={day} />
       </div>
 
-      <div className="mt-4">
-        <p
-          title={mask(formatCurrency(day.ending_balance, currency, locale))}
-          className={cn(
-            'inline-flex rounded-md bg-background/70 px-1.5 py-0.5 text-sm font-bold tabular-nums backdrop-blur dark:bg-slate-950/60',
-            day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
-          )}
-        >
-          {mask(compactCurrency(day.ending_balance, currency, locale))}
-        </p>
-      </div>
+      <span className="sr-only">
+        {t('transactions.calendarEndBalance')}: {mask(formatCurrency(day.ending_balance, currency, locale))}
+      </span>
 
-      <div className="mt-10 min-h-5">
+      <div className="mt-16 min-h-5">
         {(day.actual_count > 0 || day.projected_count > 0) && (
           <p className="mt-2 text-[11px] text-muted-foreground">
             {t('transactions.calendarItemCount', { count: day.actual_count + day.projected_count })}
@@ -527,15 +504,9 @@ function MobileDayRow({
         </p>
       </div>
       <div className="text-right">
-        <p
-          title={mask(formatCurrency(day.ending_balance, currency, locale))}
-          className={cn(
-            'text-sm font-bold tabular-nums',
-            day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
-          )}
-        >
-          {mask(formatCurrency(day.ending_balance, currency, locale))}
-        </p>
+        <span className="sr-only">
+          {t('transactions.calendarEndBalance')}: {mask(formatCurrency(day.ending_balance, currency, locale))}
+        </span>
         <CalendarBadges day={day} />
       </div>
     </button>
