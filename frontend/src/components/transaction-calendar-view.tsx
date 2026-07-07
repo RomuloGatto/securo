@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, CalendarDays, Check, ChevronDown, CircleDot, Minus, Plus } from 'lucide-react'
 import type { Account, TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CategoryIcon } from '@/components/category-icon'
 import { MonthStepper } from '@/components/month-stepper'
@@ -341,7 +340,7 @@ function DayCell({
       )}
 
       {selected && canWrite && (
-        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/80 p-1 shadow-sm dark:bg-muted/20">
+        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border/80 bg-background/85 p-1 shadow-sm backdrop-blur dark:border-slate-600/70 dark:bg-slate-950/80 dark:shadow-[0_0_0_1px_rgba(148,163,184,0.12),0_10px_24px_rgba(0,0,0,0.4)]">
           <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
             <Plus size={14} />
           </QuickAction>
@@ -379,7 +378,7 @@ function QuickAction({
         onClick()
       }}
       className={cn(
-        'inline-flex h-7 items-center justify-center rounded-md border border-transparent text-xs font-semibold transition-colors hover:border-border hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40',
+        'inline-flex h-7 items-center justify-center rounded-md border border-border/60 bg-background/70 text-xs font-semibold shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/60 dark:bg-slate-900/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-slate-800',
         tone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
         tone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
         tone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
@@ -509,25 +508,44 @@ function SelectedDayPanel({
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 p-4 border-b border-border">
-        <SummaryPill label={t('transactions.summaryIncome')} value={day.income} currency={currency} locale={locale} mask={mask} className="text-emerald-600 dark:text-emerald-400" />
-        <SummaryPill label={t('transactions.summaryExpenses')} value={day.expense} currency={currency} locale={locale} mask={mask} className="text-rose-600 dark:text-rose-400" />
-        <SummaryPill label={t('transactions.transfer')} value={day.transfer_net} currency={currency} locale={locale} mask={mask} className="text-sky-600 dark:text-sky-400" />
+      <div className="space-y-2 p-4 border-b border-border">
+        <SummaryPill
+          label={t('transactions.summaryIncome')}
+          value={day.income}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-emerald-600 dark:text-emerald-400"
+          actionLabel={t('transactions.calendarAddIncome')}
+          actionIcon={<Plus size={14} />}
+          actionTone="income"
+          onAction={canWrite ? () => onAddTransaction(day.date, 'credit', primaryAccountId) : undefined}
+        />
+        <SummaryPill
+          label={t('transactions.summaryExpenses')}
+          value={day.expense}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-rose-600 dark:text-rose-400"
+          actionLabel={t('transactions.calendarAddExpense')}
+          actionIcon={<Minus size={14} />}
+          actionTone="expense"
+          onAction={canWrite ? () => onAddTransaction(day.date, 'debit', primaryAccountId) : undefined}
+        />
+        <SummaryPill
+          label={t('transactions.transfer')}
+          value={day.transfer_net}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-sky-600 dark:text-sky-400"
+          actionLabel={t('transactions.transfer')}
+          actionIcon={<ArrowLeftRight size={14} />}
+          actionTone="transfer"
+          onAction={canWrite ? () => onTransfer(day.date) : undefined}
+        />
       </div>
-
-      {canWrite && (
-        <div className="grid grid-cols-1 gap-2 p-4 border-b border-border sm:grid-cols-3 md:grid-cols-1">
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <Plus size={14} className="text-emerald-600 dark:text-emerald-400" /> {t('transactions.income')}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <Minus size={14} className="text-rose-600 dark:text-rose-400" /> {t('transactions.expense')}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onTransfer(day.date)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <ArrowLeftRight size={14} className="text-sky-600 dark:text-sky-400" /> {t('transactions.transfer')}
-          </Button>
-        </div>
-      )}
 
       <div className="min-h-0 divide-y divide-border overflow-y-auto md:flex-1">
         {day.items.length === 0 ? (
@@ -555,6 +573,10 @@ function SummaryPill({
   locale,
   mask,
   className,
+  actionLabel,
+  actionIcon,
+  actionTone,
+  onAction,
 }: {
   label: string
   value: number
@@ -562,11 +584,35 @@ function SummaryPill({
   locale: string
   mask: (value: string) => string
   className: string
+  actionLabel?: string
+  actionIcon?: ReactNode
+  actionTone?: 'income' | 'expense' | 'transfer'
+  onAction?: () => void
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-2 py-2 dark:bg-muted/20">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
-      <p className={cn('text-xs font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
+    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-3 py-2 dark:bg-muted/20">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
+          <p className={cn('text-sm font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
+        </div>
+        {onAction && actionLabel && actionIcon && actionTone && (
+          <button
+            type="button"
+            title={actionLabel}
+            aria-label={actionLabel}
+            onClick={onAction}
+            className={cn(
+              'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/70 dark:bg-slate-950/70 dark:hover:bg-slate-800',
+              actionTone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
+              actionTone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
+              actionTone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
+            )}
+          >
+            {actionIcon}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
