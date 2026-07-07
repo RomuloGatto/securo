@@ -320,36 +320,33 @@ function DayCell({
         <CalendarBadges day={day} />
       </div>
 
-      <div className="mt-5 space-y-1">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t('transactions.calendarEndBalance')}
-        </p>
-        <p className={cn(
-          'text-sm font-bold tabular-nums',
-          day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
-        )}>
+      <div className="mt-5">
+        <p
+          title={mask(formatCurrency(day.ending_balance, currency, locale))}
+          className={cn(
+            'text-sm font-bold tabular-nums',
+            day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
+          )}
+        >
           {mask(compactCurrency(day.ending_balance, currency, locale))}
         </p>
       </div>
 
-      {(day.actual_count > 0 || day.projected_count > 0) && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          {t('transactions.calendarItemCount', { count: day.actual_count + day.projected_count })}
-          {day.projected_count > 0 && ` · ${t('transactions.calendarProjectedCount', { count: day.projected_count })}`}
-        </p>
-      )}
-
-      {selected && canWrite && (
-        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border/80 bg-background/85 p-1 shadow-sm backdrop-blur dark:border-slate-600/70 dark:bg-slate-950/80 dark:shadow-[0_0_0_1px_rgba(148,163,184,0.12),0_10px_24px_rgba(0,0,0,0.4)]">
-          <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
-            <Plus size={14} />
-          </QuickAction>
-          <QuickAction label={t('transactions.calendarAddExpense')} onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} tone="expense">
-            <Minus size={14} />
-          </QuickAction>
-          <QuickAction label={t('transactions.transfer')} onClick={() => onTransfer(day.date)} tone="transfer">
-            <ArrowLeftRight size={14} />
-          </QuickAction>
+      {canWrite && (
+        <div className="mt-3 h-9">
+          {selected && (
+            <div className="grid h-9 grid-cols-3 gap-1 rounded-lg border border-border/80 bg-background/85 p-1 shadow-sm backdrop-blur dark:border-slate-600/70 dark:bg-slate-950/80 dark:shadow-[0_0_0_1px_rgba(148,163,184,0.12),0_10px_24px_rgba(0,0,0,0.4)]">
+              <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
+                <Plus size={14} />
+              </QuickAction>
+              <QuickAction label={t('transactions.calendarAddExpense')} onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} tone="expense">
+                <Minus size={14} />
+              </QuickAction>
+              <QuickAction label={t('transactions.transfer')} onClick={() => onTransfer(day.date)} tone="transfer">
+                <ArrowLeftRight size={14} />
+              </QuickAction>
+            </div>
+          )}
         </div>
       )}
 
@@ -503,12 +500,18 @@ function SelectedDayPanel({
         <h3 className="text-lg font-bold text-foreground">
           {parseLocalDate(day.date).toLocaleDateString(dateLocale, { weekday: 'long', day: 'numeric', month: 'long' })}
         </h3>
-        <p className="mt-1 text-sm text-muted-foreground">
-          {t('transactions.calendarEndBalance')}: <span className="font-semibold text-foreground tabular-nums">{mask(formatCurrency(day.ending_balance, currency, locale))}</span>
+        <p
+          title={mask(formatCurrency(day.ending_balance, currency, locale))}
+          className={cn(
+            'mt-2 text-lg font-bold tabular-nums',
+            day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
+          )}
+        >
+          {mask(formatCurrency(day.ending_balance, currency, locale))}
         </p>
       </div>
 
-      <div className="space-y-2 p-4 border-b border-border">
+      <div className="grid grid-cols-3 gap-2 p-4 border-b border-border">
         <SummaryPill
           label={t('transactions.summaryIncome')}
           value={day.income}
@@ -590,11 +593,11 @@ function SummaryPill({
   onAction?: () => void
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-3 py-2 dark:bg-muted/20">
-      <div className="flex items-center gap-3">
+    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-2 py-2 dark:bg-muted/20">
+      <div className="flex items-center gap-1.5">
         <div className="min-w-0 flex-1">
           <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
-          <p className={cn('text-sm font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
+          <p className={cn('text-xs font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
         </div>
         {onAction && actionLabel && actionIcon && actionTone && (
           <button
@@ -603,7 +606,7 @@ function SummaryPill({
             aria-label={actionLabel}
             onClick={onAction}
             className={cn(
-              'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/70 dark:bg-slate-950/70 dark:hover:bg-slate-800',
+              'inline-flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/70 dark:bg-slate-950/70 dark:hover:bg-slate-800',
               actionTone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
               actionTone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
               actionTone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
