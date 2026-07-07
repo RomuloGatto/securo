@@ -3,7 +3,6 @@ import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowLeftRight, CalendarDays, Check, ChevronDown, CircleDot, Minus, Plus } from 'lucide-react'
 import type { Account, TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
-import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CategoryIcon } from '@/components/category-icon'
 import { MonthStepper } from '@/components/month-stepper'
@@ -23,17 +22,30 @@ function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
 }
 
-function compactCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, {
-    style: 'currency',
-    currency,
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value)
-}
-
 function signedAmount(item: TransactionCalendarItem) {
   return item.type === 'credit' ? Math.abs(item.amount) : -Math.abs(item.amount)
+}
+
+function chunkCalendarWeeks(days: TransactionCalendarDay[]) {
+  const weeks: TransactionCalendarDay[][] = []
+  for (let index = 0; index < days.length; index += 7) {
+    weeks.push(days.slice(index, index + 7))
+  }
+  return weeks
+}
+
+function balanceLinePoints(days: TransactionCalendarDay[]) {
+  const balances = days.map((day) => day.ending_balance)
+  const min = Math.min(...balances)
+  const max = Math.max(...balances)
+  const range = max - min
+  return days.map((day, index) => {
+    const x = ((index + 0.5) / days.length) * 100
+    const y = range === 0
+      ? 54
+      : 76 - ((day.ending_balance - min) / range) * 46
+    return { x, y }
+  })
 }
 
 function displayDayNumber(date: string) {
@@ -98,6 +110,7 @@ export function TransactionCalendarView({
   }, [accounts, selectedAccountId, t])
 
   const selectedDay = calendar?.days.find((day) => day.date === selectedDate)
+  const calendarWeeks = useMemo(() => chunkCalendarWeeks(calendar?.days ?? []), [calendar?.days])
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, index) => {
       const date = new Date(Date.UTC(2024, 0, 7 + index)) // Sunday-start reference week
@@ -166,21 +179,28 @@ export function TransactionCalendarView({
           ))}
         </div>
 
-        <div className="hidden md:grid grid-cols-7">
-          {calendar.days.map((day) => (
-            <DayCell
-              key={day.date}
-              day={day}
-              selected={day.date === selectedDate}
-              today={day.date === todayIso()}
-              currency={calendar.currency}
-              locale={locale}
-              mask={mask}
-              canWrite={canWrite}
-              onSelect={() => setSelectedDate(day.date)}
-              onAddTransaction={onAddTransaction}
-              onTransfer={onTransfer}
-            />
+        <div className="hidden md:block">
+          {calendarWeeks.map((week, weekIndex) => (
+            <div key={week[0]?.date ?? weekIndex} className="relative">
+              <WeekBalanceLine days={week} />
+              <div className="relative z-10 grid grid-cols-7">
+                {week.map((day) => (
+                  <DayCell
+                    key={day.date}
+                    day={day}
+                    selected={day.date === selectedDate}
+                    today={day.date === todayIso()}
+                    currency={calendar.currency}
+                    locale={locale}
+                    mask={mask}
+                    canWrite={canWrite}
+                    onSelect={() => setSelectedDate(day.date)}
+                    onAddTransaction={onAddTransaction}
+                    onTransfer={onTransfer}
+                  />
+                ))}
+              </div>
+            </div>
           ))}
         </div>
 
@@ -267,6 +287,32 @@ function AccountScopeSelect({
   )
 }
 
+function WeekBalanceLine({ days }: { days: TransactionCalendarDay[] }) {
+  if (days.length === 0) return null
+  const points = balanceLinePoints(days)
+  const linePath = points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ')
+  const areaPath = `${linePath} L ${points[points.length - 1].x.toFixed(2)} 100 L ${points[0].x.toFixed(2)} 100 Z`
+
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-x-0 top-11 bottom-0 z-0 h-[calc(100%-2.75rem)] w-full"
+    >
+      <path d={areaPath} className="fill-emerald-500/10 dark:fill-emerald-300/10" />
+      <path
+        d={linePath}
+        className="fill-none stroke-emerald-700/80 dark:stroke-emerald-300/85"
+        strokeWidth="1.75"
+        vectorEffect="non-scaling-stroke"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 function DayCell({
   day,
   selected,
@@ -304,7 +350,7 @@ function DayCell({
         }
       }}
       className={cn(
-        'relative min-h-36 border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
+        'relative min-h-40 border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
         !day.in_month && 'bg-muted/20 text-muted-foreground',
         selected && 'z-10 bg-primary/5 ring-2 ring-primary/70 dark:bg-primary/10',
       )}
@@ -321,27 +367,21 @@ function DayCell({
         <CalendarBadges day={day} />
       </div>
 
-      <div className="mt-5 space-y-1">
-        <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {t('transactions.calendarEndBalance')}
-        </p>
-        <p className={cn(
-          'text-sm font-bold tabular-nums',
-          day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400',
-        )}>
-          {mask(compactCurrency(day.ending_balance, currency, locale))}
-        </p>
+      <span className="sr-only">
+        {t('transactions.calendarEndBalance')}: {mask(formatCurrency(day.ending_balance, currency, locale))}
+      </span>
+
+      <div className="mt-16 min-h-5">
+        {(day.actual_count > 0 || day.projected_count > 0) && (
+          <p className="mt-2 text-[11px] text-muted-foreground">
+            {t('transactions.calendarItemCount', { count: day.actual_count + day.projected_count })}
+            {day.projected_count > 0 && ` · ${t('transactions.calendarProjectedCount', { count: day.projected_count })}`}
+          </p>
+        )}
       </div>
 
-      {(day.actual_count > 0 || day.projected_count > 0) && (
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          {t('transactions.calendarItemCount', { count: day.actual_count + day.projected_count })}
-          {day.projected_count > 0 && ` · ${t('transactions.calendarProjectedCount', { count: day.projected_count })}`}
-        </p>
-      )}
-
       {selected && canWrite && (
-        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/80 p-1 shadow-sm dark:bg-muted/20">
+        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border/80 bg-background/85 p-1 shadow-sm backdrop-blur dark:border-slate-600/70 dark:bg-slate-950/80 dark:shadow-[0_0_0_1px_rgba(148,163,184,0.12),0_10px_24px_rgba(0,0,0,0.4)]">
           <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
             <Plus size={14} />
           </QuickAction>
@@ -379,7 +419,7 @@ function QuickAction({
         onClick()
       }}
       className={cn(
-        'inline-flex h-7 items-center justify-center rounded-md border border-transparent text-xs font-semibold transition-colors hover:border-border hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40',
+        'inline-flex h-7 items-center justify-center rounded-md border border-border/60 bg-background/70 text-xs font-semibold shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/60 dark:bg-slate-900/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-slate-800',
         tone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
         tone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
         tone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
@@ -464,9 +504,9 @@ function MobileDayRow({
         </p>
       </div>
       <div className="text-right">
-        <p className={cn('text-sm font-bold tabular-nums', day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
-          {mask(formatCurrency(day.ending_balance, currency, locale))}
-        </p>
+        <span className="sr-only">
+          {t('transactions.calendarEndBalance')}: {mask(formatCurrency(day.ending_balance, currency, locale))}
+        </span>
         <CalendarBadges day={day} />
       </div>
     </button>
@@ -509,25 +549,44 @@ function SelectedDayPanel({
         </p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 p-4 border-b border-border">
-        <SummaryPill label={t('transactions.summaryIncome')} value={day.income} currency={currency} locale={locale} mask={mask} className="text-emerald-600 dark:text-emerald-400" />
-        <SummaryPill label={t('transactions.summaryExpenses')} value={day.expense} currency={currency} locale={locale} mask={mask} className="text-rose-600 dark:text-rose-400" />
-        <SummaryPill label={t('transactions.transfer')} value={day.transfer_net} currency={currency} locale={locale} mask={mask} className="text-sky-600 dark:text-sky-400" />
+      <div className="space-y-2 p-4 border-b border-border">
+        <SummaryPill
+          label={t('transactions.summaryIncome')}
+          value={day.income}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-emerald-600 dark:text-emerald-400"
+          actionLabel={t('transactions.calendarAddIncome')}
+          actionIcon={<Plus size={14} />}
+          actionTone="income"
+          onAction={canWrite ? () => onAddTransaction(day.date, 'credit', primaryAccountId) : undefined}
+        />
+        <SummaryPill
+          label={t('transactions.summaryExpenses')}
+          value={day.expense}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-rose-600 dark:text-rose-400"
+          actionLabel={t('transactions.calendarAddExpense')}
+          actionIcon={<Minus size={14} />}
+          actionTone="expense"
+          onAction={canWrite ? () => onAddTransaction(day.date, 'debit', primaryAccountId) : undefined}
+        />
+        <SummaryPill
+          label={t('transactions.transfer')}
+          value={day.transfer_net}
+          currency={currency}
+          locale={locale}
+          mask={mask}
+          className="text-sky-600 dark:text-sky-400"
+          actionLabel={t('transactions.transfer')}
+          actionIcon={<ArrowLeftRight size={14} />}
+          actionTone="transfer"
+          onAction={canWrite ? () => onTransfer(day.date) : undefined}
+        />
       </div>
-
-      {canWrite && (
-        <div className="grid grid-cols-1 gap-2 p-4 border-b border-border sm:grid-cols-3 md:grid-cols-1">
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <Plus size={14} className="text-emerald-600 dark:text-emerald-400" /> {t('transactions.income')}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <Minus size={14} className="text-rose-600 dark:text-rose-400" /> {t('transactions.expense')}
-          </Button>
-          <Button size="sm" variant="outline" onClick={() => onTransfer(day.date)} className="justify-start gap-2 border-border bg-background hover:bg-muted hover:text-foreground">
-            <ArrowLeftRight size={14} className="text-sky-600 dark:text-sky-400" /> {t('transactions.transfer')}
-          </Button>
-        </div>
-      )}
 
       <div className="min-h-0 divide-y divide-border overflow-y-auto md:flex-1">
         {day.items.length === 0 ? (
@@ -555,6 +614,10 @@ function SummaryPill({
   locale,
   mask,
   className,
+  actionLabel,
+  actionIcon,
+  actionTone,
+  onAction,
 }: {
   label: string
   value: number
@@ -562,11 +625,35 @@ function SummaryPill({
   locale: string
   mask: (value: string) => string
   className: string
+  actionLabel?: string
+  actionIcon?: ReactNode
+  actionTone?: 'income' | 'expense' | 'transfer'
+  onAction?: () => void
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-2 py-2 dark:bg-muted/20">
-      <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
-      <p className={cn('text-xs font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
+    <div className="min-w-0 rounded-lg border border-border bg-background/60 px-3 py-2 dark:bg-muted/20">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[10px] uppercase tracking-wide text-muted-foreground truncate">{label}</p>
+          <p className={cn('text-sm font-bold tabular-nums truncate', className)}>{mask(formatCurrency(Math.abs(value), currency, locale))}</p>
+        </div>
+        {onAction && actionLabel && actionIcon && actionTone && (
+          <button
+            type="button"
+            title={actionLabel}
+            aria-label={actionLabel}
+            onClick={onAction}
+            className={cn(
+              'inline-flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/70 dark:bg-slate-950/70 dark:hover:bg-slate-800',
+              actionTone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
+              actionTone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
+              actionTone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
+            )}
+          >
+            {actionIcon}
+          </button>
+        )}
+      </div>
     </div>
   )
 }
