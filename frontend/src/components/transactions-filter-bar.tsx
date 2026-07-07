@@ -406,9 +406,7 @@ export function TransactionsFilterBar({
                       {accountSelectionMode === 'single' && (
                         <>
                           <DropdownMenuItem
-                            onSelect={(e) => {
-                              e.preventDefault()
-                              keepAccountSubOpenRef.current = true
+                            onSelect={() => {
                               onAccountIdsChange([])
                             }}
                             className={cn(
@@ -434,9 +432,7 @@ export function TransactionsFilterBar({
                           return (
                             <DropdownMenuItem
                               key={a.id}
-                              onSelect={(e) => {
-                                e.preventDefault()
-                                keepAccountSubOpenRef.current = true
+                              onSelect={() => {
                                 onAccountIdsChange(checked ? [] : [a.id])
                               }}
                               className={cn(

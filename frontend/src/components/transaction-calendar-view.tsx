@@ -1,11 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, CalendarDays, CircleDot, Minus, Plus } from 'lucide-react'
+import { ArrowLeftRight, CalendarDays, Check, ChevronDown, CircleDot, Minus, Plus } from 'lucide-react'
 import type { Account, TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CategoryIcon } from '@/components/category-icon'
+import { MonthStepper } from '@/components/month-stepper'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 
 function parseLocalDate(value: string) {
@@ -45,6 +52,10 @@ export function TransactionCalendarView({
   dateLocale,
   mask,
   canWrite,
+  month,
+  onMonthChange,
+  selectedAccountId,
+  onAccountScopeChange,
   onAddTransaction,
   onTransfer,
   onOpenTransaction,
@@ -56,6 +67,10 @@ export function TransactionCalendarView({
   dateLocale: string
   mask: (value: string) => string
   canWrite: boolean
+  month: string
+  onMonthChange: (yearMonth: string) => void
+  selectedAccountId: string | null
+  onAccountScopeChange: (accountId: string | null) => void
   onAddTransaction: (date: string, type: 'credit' | 'debit', accountId?: string | null) => void
   onTransfer: (date: string) => void
   onOpenTransaction: (id: string) => void
@@ -75,14 +90,12 @@ export function TransactionCalendarView({
   }, [calendar])
 
   const accountLabel = useMemo(() => {
-    const ids = calendar?.account_ids
-    if (ids && ids.length === 1) {
-      const account = accounts.find((a) => a.id === ids[0])
+    if (selectedAccountId) {
+      const account = accounts.find((a) => a.id === selectedAccountId)
       return account?.display_name || account?.name || t('transactions.calendarOneAccount')
     }
-    if (ids && ids.length > 1) return t('transactions.calendarAccountCount', { count: ids.length })
     return t('transactions.calendarAllAccounts')
-  }, [accounts, calendar?.account_ids, t])
+  }, [accounts, selectedAccountId, t])
 
   const selectedDay = calendar?.days.find((day) => day.date === selectedDate)
   const weekDays = useMemo(
@@ -115,8 +128,8 @@ export function TransactionCalendarView({
   if (!calendar) return null
 
   return (
-    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr),minmax(280px,340px)] mb-4">
-      <section className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
+    <div className="mb-4 flex flex-col gap-4 md:flex-row md:items-start">
+      <section className="min-w-0 flex-1 bg-card rounded-xl border border-border shadow-sm overflow-hidden">
         <div className="px-4 sm:px-5 py-4 border-b border-border flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1.5">
@@ -127,8 +140,21 @@ export function TransactionCalendarView({
               {parseLocalDate(`${calendar.month}-02`).toLocaleDateString(dateLocale, { month: 'long', year: 'numeric' })}
             </h2>
           </div>
-          <div className="rounded-lg border border-border bg-muted/30 px-3 py-1.5 text-sm font-medium text-muted-foreground">
-            {accountLabel}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <MonthStepper
+              value={month}
+              onChange={onMonthChange}
+              locale={dateLocale}
+              prevLabel={t('transactions.monthPrevious')}
+              nextLabel={t('transactions.monthNext')}
+            />
+            <AccountScopeSelect
+              accounts={accounts}
+              selectedAccountId={selectedAccountId}
+              label={accountLabel}
+              allLabel={t('transactions.calendarAllAccounts')}
+              onChange={onAccountScopeChange}
+            />
           </div>
         </div>
 
@@ -150,7 +176,10 @@ export function TransactionCalendarView({
               currency={calendar.currency}
               locale={locale}
               mask={mask}
+              canWrite={canWrite}
               onSelect={() => setSelectedDate(day.date)}
+              onAddTransaction={onAddTransaction}
+              onTransfer={onTransfer}
             />
           ))}
         </div>
@@ -186,6 +215,58 @@ export function TransactionCalendarView({
   )
 }
 
+function accountDisplayName(account: Account) {
+  return account.display_name || account.name
+}
+
+function AccountScopeSelect({
+  accounts,
+  selectedAccountId,
+  label,
+  allLabel,
+  onChange,
+}: {
+  accounts: Account[]
+  selectedAccountId: string | null
+  label: string
+  allLabel: string
+  onChange: (accountId: string | null) => void
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex h-8 max-w-[220px] items-center gap-2 rounded-lg border border-border bg-card px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+        >
+          <span className="truncate">{label}</span>
+          <ChevronDown size={14} className="shrink-0" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64">
+        <DropdownMenuItem onSelect={() => onChange(null)} className="gap-2">
+          <span className="min-w-0 flex-1 truncate">{allLabel}</span>
+          {!selectedAccountId && <Check size={14} className="text-primary" />}
+        </DropdownMenuItem>
+        {accounts.map((account) => {
+          const selected = selectedAccountId === account.id
+          return (
+            <DropdownMenuItem key={account.id} onSelect={() => onChange(selected ? null : account.id)} className="gap-2">
+              <span className="min-w-0 flex-1 truncate">{accountDisplayName(account)}</span>
+              {account.currency && (
+                <span className="text-[10.5px] uppercase tracking-wide text-muted-foreground/70">
+                  {account.currency}
+                </span>
+              )}
+              {selected && <Check size={14} className="text-primary" />}
+            </DropdownMenuItem>
+          )
+        })}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  )
+}
+
 function DayCell({
   day,
   selected,
@@ -193,7 +274,10 @@ function DayCell({
   currency,
   locale,
   mask,
+  canWrite,
   onSelect,
+  onAddTransaction,
+  onTransfer,
 }: {
   day: TransactionCalendarDay
   selected: boolean
@@ -201,9 +285,13 @@ function DayCell({
   currency: string
   locale: string
   mask: (value: string) => string
+  canWrite: boolean
   onSelect: () => void
+  onAddTransaction: (date: string, type: 'credit' | 'debit', accountId?: string | null) => void
+  onTransfer: (date: string) => void
 }) {
   const { t } = useTranslation()
+  const primaryAccountId = day.items.find((item) => item.account_id)?.account_id
   return (
     <div
       role="button"
@@ -230,7 +318,7 @@ function DayCell({
         )}>
           {displayDayNumber(day.date)}
         </span>
-        <CalendarBadges day={day} currency={currency} locale={locale} mask={mask} />
+        <CalendarBadges day={day} />
       </div>
 
       <div className="mt-5 space-y-1">
@@ -252,33 +340,68 @@ function DayCell({
         </p>
       )}
 
+      {selected && canWrite && (
+        <div className="mt-3 grid grid-cols-3 gap-1 rounded-lg border border-border bg-background/80 p-1 shadow-sm dark:bg-muted/20">
+          <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
+            <Plus size={14} />
+          </QuickAction>
+          <QuickAction label={t('transactions.calendarAddExpense')} onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} tone="expense">
+            <Minus size={14} />
+          </QuickAction>
+          <QuickAction label={t('transactions.transfer')} onClick={() => onTransfer(day.date)} tone="transfer">
+            <ArrowLeftRight size={14} />
+          </QuickAction>
+        </div>
+      )}
+
     </div>
   )
 }
 
-function CalendarBadges({
-  day,
-  currency,
-  locale,
-  mask,
+function QuickAction({
+  label,
+  tone,
+  onClick,
+  children,
 }: {
-  day: TransactionCalendarDay
-  currency: string
-  locale: string
-  mask: (value: string) => string
+  label: string
+  tone: 'income' | 'expense' | 'transfer'
+  onClick: () => void
+  children: ReactNode
 }) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation()
+        onClick()
+      }}
+      className={cn(
+        'inline-flex h-7 items-center justify-center rounded-md border border-transparent text-xs font-semibold transition-colors hover:border-border hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40',
+        tone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
+        tone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
+        tone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+function CalendarBadges({ day }: { day: TransactionCalendarDay }) {
   const { t } = useTranslation()
-  const moneyTooltip = (label: string, value: number) => `${label}: ${mask(formatCurrency(Math.abs(value), currency, locale))}`
   return (
     <div className="flex flex-wrap justify-end gap-1">
-      {day.has_income && <BadgeDot tone="income" label={moneyTooltip(t('transactions.summaryIncome'), day.income)} />}
-      {day.has_expense && <BadgeDot tone="expense" label={moneyTooltip(t('transactions.summaryExpenses'), day.expense)} />}
+      {day.has_income && <BadgeDot tone="income" label={t('transactions.summaryIncome')} />}
+      {day.has_expense && <BadgeDot tone="expense" label={t('transactions.summaryExpenses')} />}
       {day.has_transfer && (
-        <BadgeDot tone="transfer" label={moneyTooltip(t('transactions.transfer'), day.transfer_net)}>
+        <BadgeDot tone="transfer" label={t('transactions.transfer')}>
           <ArrowLeftRight size={12} />
         </BadgeDot>
       )}
-      {day.projected_count > 0 && <BadgeDot tone="projected" label={t('transactions.calendarProjectedCount', { count: day.projected_count })} />}
+      {day.projected_count > 0 && <BadgeDot tone="projected" label={t('transactions.calendarProjected')} />}
     </div>
   )
 }
@@ -344,7 +467,7 @@ function MobileDayRow({
         <p className={cn('text-sm font-bold tabular-nums', day.ending_balance < 0 ? 'text-rose-600 dark:text-rose-400' : 'text-emerald-600 dark:text-emerald-400')}>
           {mask(formatCurrency(day.ending_balance, currency, locale))}
         </p>
-        <CalendarBadges day={day} currency={currency} locale={locale} mask={mask} />
+        <CalendarBadges day={day} />
       </div>
     </button>
   )
@@ -375,7 +498,7 @@ function SelectedDayPanel({
   if (!day) return null
   const primaryAccountId = day.items.find((item) => item.account_id)?.account_id
   return (
-    <aside className="bg-card rounded-xl border border-border shadow-sm overflow-hidden md:sticky md:top-4 md:self-start md:max-h-[calc(100vh-7rem)] md:flex md:flex-col">
+    <aside className="bg-card rounded-xl border border-border shadow-sm overflow-hidden md:sticky md:top-4 md:max-h-[calc(100vh-7rem)] md:w-[320px] md:shrink-0 md:self-start md:flex md:flex-col lg:w-[340px]">
       <div className="px-4 py-4 border-b border-border">
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('transactions.calendarSelectedDay')}</p>
         <h3 className="text-lg font-bold text-foreground">

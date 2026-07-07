@@ -1397,6 +1397,13 @@ export default function TransactionsPage() {
           dateLocale={dateLocale}
           mask={mask}
           canWrite={canWrite}
+          month={calendarMonth}
+          onMonthChange={handleMonthChange}
+          selectedAccountId={calendarAccountIds[0] ?? null}
+          onAccountScopeChange={(accountId) => {
+            setFilterAccountIds(accountId ? [accountId] : [])
+            setPage(1)
+          }}
           onAddTransaction={handleCalendarAddTransaction}
           onTransfer={handleCalendarTransfer}
           onOpenTransaction={handleOpenCalendarTransaction}
