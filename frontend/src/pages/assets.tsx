@@ -1065,7 +1065,7 @@ export default function AssetsPage() {
         />
       ) : (
       <>
-      {/* Portfolio Stacked Area Chart */}
+      {/* Portfolio Chart */}
       {portfolioData && portfolioData.trend.length > 0 && (
         <PortfolioChart
           data={portfolioData}
@@ -1698,8 +1698,13 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
 }) {
   const { t } = useTranslation()
   // Default to wallet mode: with many synced CDBs the asset view turns
-  // into a cluttered rainbow legend that's hard to parse.
+  // into a cluttered rainbow legend that's hard to parse. Keep stacked as
+  // the default drawing style, while letting users switch to true lines when
+  // they need to compare each wallet/asset's own value instead of the running
+  // cumulative total.
   const [mode, setMode] = useState<'wallet' | 'asset'>('wallet')
+  const [drawMode, setDrawMode] = useState<'stacked' | 'lines'>('stacked')
+  const isStacked = drawMode === 'stacked'
 
   const formatCompact = (v: number) => {
     const abs = Math.abs(v)
@@ -1793,25 +1798,49 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
 
   return (
     <div className="border border-border rounded-xl bg-card shadow-sm p-5">
-      <div className="flex items-center justify-between mb-4 gap-4">
-        <div className="flex items-center gap-3">
+      <div className="flex flex-col gap-3 mb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-2">
           <h3 className="text-sm font-semibold text-foreground">{t('assets.portfolioValue')}</h3>
-          <div className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
-            <button
-              onClick={() => setMode('wallet')}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${mode === 'wallet' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('assets.chartByWallet')}
-            </button>
-            <button
-              onClick={() => setMode('asset')}
-              className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${mode === 'asset' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
-            >
-              {t('assets.chartByAsset')}
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <div role="group" aria-label={t('assets.chartGroupMode')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
+              <button
+                type="button"
+                aria-pressed={mode === 'wallet'}
+                onClick={() => setMode('wallet')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${mode === 'wallet' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t('assets.chartByWallet')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={mode === 'asset'}
+                onClick={() => setMode('asset')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${mode === 'asset' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t('assets.chartByAsset')}
+              </button>
+            </div>
+            <div role="group" aria-label={t('assets.chartDrawMode')} className="inline-flex items-center rounded-lg border border-border p-0.5 bg-muted/40">
+              <button
+                type="button"
+                aria-pressed={drawMode === 'stacked'}
+                onClick={() => setDrawMode('stacked')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${drawMode === 'stacked' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t('assets.chartStacked')}
+              </button>
+              <button
+                type="button"
+                aria-pressed={drawMode === 'lines'}
+                onClick={() => setDrawMode('lines')}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${drawMode === 'lines' ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+              >
+                {t('assets.chartLines')}
+              </button>
+            </div>
           </div>
         </div>
-        <div className="text-right">
+        <div className="text-left sm:text-right">
           <span className="text-xs text-muted-foreground">{t('assets.total')}</span>
           <p className="text-lg font-bold tabular-nums text-foreground">
             {mask(formatCurrency(data.total, currency, loc))}
@@ -1878,16 +1907,17 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
                 )
               }}
             />
-            {/* Stacked areas — one colored band per series */}
+            {/* Stacked mode shows cumulative bands; line mode plots each series' own value. */}
             {sortedSeries.map(s => (
               <Area
                 key={s.key}
                 type="monotone"
                 dataKey={s.key}
-                stackId="portfolio"
+                stackId={isStacked ? 'portfolio' : undefined}
                 stroke={s.color}
-                strokeWidth={1}
-                fill={`url(#portfolio-grad-${s.key})`}
+                strokeWidth={isStacked ? 1 : 2}
+                fill={isStacked ? `url(#portfolio-grad-${s.key})` : 'none'}
+                fillOpacity={isStacked ? 1 : 0}
                 dot={false}
                 activeDot={{ r: 3, strokeWidth: 1.5, fill: 'var(--card)' }}
               />
