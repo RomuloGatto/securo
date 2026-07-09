@@ -27,7 +27,6 @@ import {
   Pencil,
   Trash2,
   RefreshCw,
-  RefreshCcwDot,
   TriangleAlert,
   Unlink,
   Plus,
@@ -350,6 +349,8 @@ export default function AccountsPage() {
             <div className="space-y-3">
               {connectionsList.map((conn) => {
                 const connAccounts = bankAccounts.filter((a) => a.connection_id === conn.id)
+                const needsReconnect = conn.status !== 'active'
+                const syncPending = syncMutation.isPending && syncMutation.variables === conn.id
                 return (
                   <div key={conn.id} className="bg-card rounded-xl border border-border shadow-sm">
                     {/* Connection header */}
@@ -387,32 +388,28 @@ export default function AccountsPage() {
                           >
                             <Settings size={14} />
                           </Button>
-                          {conn.status !== 'active' && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="relative h-8 w-8 p-0 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
-                              onClick={() => handleReconnectClick(conn)}
-                              title={conn.status === 'expired'
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className={needsReconnect
+                              ? 'relative h-8 w-8 p-0 text-amber-500 hover:bg-amber-500/10 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300'
+                              : 'h-8 w-8 p-0 text-muted-foreground hover:text-foreground'}
+                            onClick={() => needsReconnect ? handleReconnectClick(conn) : syncMutation.mutate(conn.id)}
+                            disabled={syncPending}
+                            title={needsReconnect
+                              ? conn.status === 'expired'
                                 ? t('accounts.connectionExpired')
-                                : t('accounts.connectionError')}
-                              aria-label={t('accounts.reconnect')}
-                            >
-                              <RefreshCcwDot size={15} />
+                                : t('accounts.connectionError')
+                              : t('accounts.sync')}
+                            aria-label={needsReconnect ? t('accounts.reconnect') : t('accounts.sync')}
+                          >
+                            <RefreshCw size={14} className={syncPending ? 'animate-spin' : ''} />
+                            {needsReconnect && (
                               <TriangleAlert
                                 size={10}
                                 className="absolute -right-0.5 -top-0.5 rounded-full bg-card text-amber-500"
                               />
-                            </Button>
-                          )}
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                            onClick={() => syncMutation.mutate(conn.id)}
-                            disabled={syncMutation.isPending && syncMutation.variables === conn.id}
-                          >
-                            <RefreshCw size={14} className={syncMutation.isPending && syncMutation.variables === conn.id ? 'animate-spin' : ''} />
+                            )}
                           </Button>
                           <Button
                             variant="ghost"
