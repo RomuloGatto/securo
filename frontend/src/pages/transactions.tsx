@@ -631,6 +631,7 @@ export default function TransactionsPage() {
     onSuccess: () => {
       invalidateAfterTxMutation()
       setTransferDialogOpen(false)
+      setTransferDefaultDate(undefined)
       toast.success(t('transactions.transferCreated'))
     },
     onError: (error) => {
@@ -831,9 +832,13 @@ export default function TransactionsPage() {
     setDialogOpen(true)
   }
 
-  const handleCalendarTransfer = (date: string) => {
+  const openTransferDialog = (date?: string) => {
     setTransferDefaultDate(date)
     setTransferDialogOpen(true)
+  }
+
+  const handleCalendarTransfer = (date: string) => {
+    openTransferDialog(date)
   }
 
   const handleOpenCalendarTransaction = async (id: string) => {
@@ -1254,7 +1259,7 @@ export default function TransactionsPage() {
                 </Button>
               )}
               {canWrite && (
-                <Button variant="outline" onClick={() => setTransferDialogOpen(true)}>
+                <Button variant="outline" onClick={() => openTransferDialog()}>
                   <ArrowLeftRight size={16} className="mr-1.5" />
                   {t('transactions.transfer')}
                 </Button>
@@ -1292,7 +1297,7 @@ export default function TransactionsPage() {
                   </DropdownMenuItem>
                 )}
                 {canWrite && (
-                  <DropdownMenuItem onClick={() => setTransferDialogOpen(true)}>
+                  <DropdownMenuItem onClick={() => openTransferDialog()}>
                     <ArrowLeftRight size={16} className="mr-2" />
                     {t('transactions.transfer')}
                   </DropdownMenuItem>

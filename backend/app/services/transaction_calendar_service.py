@@ -18,7 +18,7 @@ from app.schemas.transaction_calendar import (
     TransactionCalendarItem,
     TransactionCalendarResponse,
 )
-from app.services.dashboard_service import _balance_at
+from app.services.dashboard_service import _balance_at, _daily_balance_deltas_by_date
 from app.services.fx_rate_service import convert as fx_convert
 from app.services.recurring_transaction_service import get_occurrences_in_range
 
@@ -78,7 +78,14 @@ async def get_transaction_calendar(
     actual_rows = await _load_actual_transactions(
         session, workspace_id, grid_start, grid_end, requested_account_ids
     )
-    balance_deltas: dict[date, float] = {}
+    balance_deltas = await _daily_balance_deltas_by_date(
+        session,
+        workspace_id,
+        grid_start,
+        grid_end,
+        primary_currency_hint=primary_currency,
+        account_ids=requested_account_ids,
+    )
     for tx in actual_rows:
         if tx.date not in days:
             continue
@@ -86,15 +93,12 @@ async def get_transaction_calendar(
         amount_primary = await _positive_primary_amount(
             session, tx.amount, tx.currency, primary_currency, tx.amount_primary
         )
-        signed_balance_delta = await _signed_balance_delta_primary(session, tx, primary_currency)
-        if _counts_for_balance(tx):
-            balance_deltas[tx.date] = balance_deltas.get(tx.date, 0.0) + signed_balance_delta
 
         is_transfer = bool(tx.transfer_pair_id) or bool(tx.category and tx.category.treat_as_transfer)
         ignored = bool(tx.is_ignored or (tx.category and tx.category.is_ignored))
         if not ignored:
             if is_transfer or tx.source == "transfer":
-                day.transfer_net += signed_balance_delta
+                day.transfer_net += await _signed_balance_delta_primary(session, tx, primary_currency)
                 day.has_transfer = True
             elif tx.source != "opening_balance":
                 if tx.type == "credit":
@@ -218,10 +222,6 @@ async def _load_actual_transactions(
     return list(result.scalars().all())
 
 
-def _counts_for_balance(tx: Transaction) -> bool:
-    return not bool(tx.is_ignored or (tx.category and tx.category.is_ignored))
-
-
 async def _positive_primary_amount(
     session: AsyncSession,
     amount: Decimal,
@@ -287,11 +287,13 @@ async def _project_recurring_items(
 ) -> tuple[list[tuple[TransactionCalendarItem, float]], dict[date, float]]:
     stmt = (
         select(RecurringTransaction)
+        .join(Account, RecurringTransaction.account_id == Account.id)
         .outerjoin(Category, RecurringTransaction.category_id == Category.id)
         .where(
             RecurringTransaction.workspace_id == workspace_id,
             RecurringTransaction.is_active == True,
             RecurringTransaction.start_date < end,
+            Account.is_closed == False,
         )
         .options(
             selectinload(RecurringTransaction.account),
