@@ -1203,10 +1203,8 @@ export default function TransactionsPage() {
         title={t('transactions.title')}
         action={
           // Single row at every width: [month stepper] [+ Add Transaction] [⋯].
-          // The stepper is compact and shrinks first so all three fit on a
-          // phone (#257). On desktop the secondary actions (Columns, Export,
-          // Duplicate, Transfer) are inline labelled buttons; on mobile they
-          // collapse into the overflow menu so the row stays uncrowded.
+          // The stepper is the canonical month control for both list and
+          // calendar views; the calendar card itself stays read-focused.
           <div className="flex items-center gap-2 sm:flex-wrap sm:justify-end">
             <MonthStepper
               value={steppedMonth}
@@ -1410,18 +1408,10 @@ export default function TransactionsPage() {
         <TransactionCalendarView
           calendar={calendarData}
           isLoading={calendarLoading}
-          accounts={accountsList ?? []}
           locale={locale}
           dateLocale={dateLocale}
           mask={mask}
           canWrite={canWrite}
-          month={calendarMonth}
-          onMonthChange={handleMonthChange}
-          selectedAccountId={calendarAccountIds[0] ?? null}
-          onAccountScopeChange={(accountId) => {
-            setFilterAccountIds(accountId ? [accountId] : [])
-            setPage(1)
-          }}
           selectedDate={calendarSelectedDate}
           onSelectedDateChange={setCalendarSelectedDate}
           onAddTransaction={handleCalendarAddTransaction}
