@@ -1851,7 +1851,7 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={displayTrend} margin={{ top: 4, right: 12, left: 0, bottom: 0 }}>
             <defs>
-              {sortedSeries.map(s => (
+              {isStacked && sortedSeries.map(s => (
                 <linearGradient key={s.key} id={`portfolio-grad-${s.key}`} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor={s.color} stopOpacity={0.5} />
                   <stop offset="100%" stopColor={s.color} stopOpacity={0.1} />
@@ -1917,13 +1917,14 @@ function PortfolioChart({ data, wallets, currency, locale: loc, dateLocale: date
                 stroke={s.color}
                 strokeWidth={isStacked ? 1 : 2}
                 fill={isStacked ? `url(#portfolio-grad-${s.key})` : 'none'}
-                fillOpacity={isStacked ? 1 : 0}
                 dot={false}
                 activeDot={{ r: 3, strokeWidth: 1.5, fill: 'var(--card)' }}
               />
             ))}
-            {/* Hidden total for tooltip */}
-            <Area dataKey="_total" stroke="none" fill="none" dot={false} activeDot={false} />
+            {/* Hidden total for tooltip. Kept out of the chart in line mode so the
+                Y axis scales to the largest single series instead of the portfolio
+                total, which would otherwise squash every line against the baseline. */}
+            <Area dataKey="_total" stroke="none" fill="none" dot={false} activeDot={false} hide={!isStacked} />
           </AreaChart>
         </ResponsiveContainer>
       </div>
