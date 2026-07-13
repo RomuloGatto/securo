@@ -144,7 +144,6 @@ export default function TransactionsPage() {
     searchParams.get('view') === 'calendar' ? 'calendar' : 'list'
   ))
   const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => searchParams.get('day') ?? '')
-  const [transferDefaultDate, setTransferDefaultDate] = useState<string | undefined>(undefined)
   const [filterPayee, setFilterPayee] = useState<string>(searchParams.get('payee_id') ?? '')
   const [filterGroupId, setFilterGroupId] = useState<string>(searchParams.get('group_id') ?? '')
   const [filterType, setFilterType] = useState<string>(searchParams.get('type') ?? '')
@@ -631,7 +630,6 @@ export default function TransactionsPage() {
     onSuccess: () => {
       invalidateAfterTxMutation()
       setTransferDialogOpen(false)
-      setTransferDefaultDate(undefined)
       toast.success(t('transactions.transferCreated'))
     },
     onError: (error) => {
@@ -813,32 +811,6 @@ export default function TransactionsPage() {
     setDuplicateDraft(draft)
     setFormResetKey(k => k + 1)
     setDialogOpen(true)
-  }
-
-  const handleCalendarAddTransaction = (date: string, type: 'credit' | 'debit', accountId?: string | null) => {
-    const selectedAccount = accountsList?.find((account) => account.id === accountId)
-      ?? (effectiveAccountIds.length === 1
-        ? accountsList?.find((account) => account.id === effectiveAccountIds[0])
-        : undefined)
-    const draft: Partial<Transaction> = {
-      date,
-      type,
-      account_id: selectedAccount?.id,
-      currency: selectedAccount?.currency ?? userCurrency,
-    }
-    setEditingTx(null)
-    setDuplicateDraft(draft)
-    setFormResetKey(k => k + 1)
-    setDialogOpen(true)
-  }
-
-  const openTransferDialog = (date?: string) => {
-    setTransferDefaultDate(date)
-    setTransferDialogOpen(true)
-  }
-
-  const handleCalendarTransfer = (date: string) => {
-    openTransferDialog(date)
   }
 
   const handleOpenCalendarTransaction = async (id: string) => {
@@ -1257,7 +1229,7 @@ export default function TransactionsPage() {
                 </Button>
               )}
               {canWrite && (
-                <Button variant="outline" onClick={() => openTransferDialog()}>
+                <Button variant="outline" onClick={() => setTransferDialogOpen(true)}>
                   <ArrowLeftRight size={16} className="mr-1.5" />
                   {t('transactions.transfer')}
                 </Button>
@@ -1295,7 +1267,7 @@ export default function TransactionsPage() {
                   </DropdownMenuItem>
                 )}
                 {canWrite && (
-                  <DropdownMenuItem onClick={() => openTransferDialog()}>
+                  <DropdownMenuItem onClick={() => setTransferDialogOpen(true)}>
                     <ArrowLeftRight size={16} className="mr-2" />
                     {t('transactions.transfer')}
                   </DropdownMenuItem>
@@ -1411,11 +1383,8 @@ export default function TransactionsPage() {
           locale={locale}
           dateLocale={dateLocale}
           mask={mask}
-          canWrite={canWrite}
           selectedDate={calendarSelectedDate}
           onSelectedDateChange={setCalendarSelectedDate}
-          onAddTransaction={handleCalendarAddTransaction}
-          onTransfer={handleCalendarTransfer}
           onOpenTransaction={handleOpenCalendarTransaction}
         />
       )}
@@ -1787,11 +1756,10 @@ export default function TransactionsPage() {
       {/* Transfer Dialog */}
       <TransferDialog
         open={transferDialogOpen}
-        onClose={() => { setTransferDialogOpen(false); setTransferDefaultDate(undefined) }}
+        onClose={() => setTransferDialogOpen(false)}
         accounts={accountsList ?? []}
         onSave={(data) => transferMutation.mutate(data)}
         loading={transferMutation.isPending}
-        defaultDate={transferDefaultDate}
       />
 
       {/* Add/Edit Dialog */}

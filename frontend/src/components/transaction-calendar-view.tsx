@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
-import { ArrowLeftRight, CalendarDays, CircleDot, Minus, Plus } from 'lucide-react'
+import { ArrowLeftRight, CalendarDays, CircleDot } from 'lucide-react'
 import type { TransactionCalendarDay, TransactionCalendarItem, TransactionCalendarResponse } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CategoryIcon } from '@/components/category-icon'
@@ -51,11 +51,8 @@ export function TransactionCalendarView({
   locale,
   dateLocale,
   mask,
-  canWrite,
   selectedDate,
   onSelectedDateChange,
-  onAddTransaction,
-  onTransfer,
   onOpenTransaction,
 }: {
   calendar?: TransactionCalendarResponse
@@ -63,11 +60,8 @@ export function TransactionCalendarView({
   locale: string
   dateLocale: string
   mask: (value: string) => string
-  canWrite: boolean
   selectedDate: string
   onSelectedDateChange: (date: string) => void
-  onAddTransaction: (date: string, type: 'credit' | 'debit', accountId?: string | null) => void
-  onTransfer: (date: string) => void
   onOpenTransaction: (id: string) => void
 }) {
   const [density, setDensity] = useState<CalendarDensity>(readCalendarDensity)
@@ -142,10 +136,7 @@ export function TransactionCalendarView({
               locale={locale}
               mask={mask}
               density={density}
-              canWrite={canWrite}
               onSelect={() => onSelectedDateChange(day.date)}
-              onAddTransaction={onAddTransaction}
-              onTransfer={onTransfer}
             />
           ))}
         </div>
@@ -239,10 +230,7 @@ function DayCell({
   locale,
   mask,
   density,
-  canWrite,
   onSelect,
-  onAddTransaction,
-  onTransfer,
 }: {
   day: TransactionCalendarDay
   selected: boolean
@@ -251,13 +239,9 @@ function DayCell({
   locale: string
   mask: (value: string) => string
   density: CalendarDensity
-  canWrite: boolean
   onSelect: () => void
-  onAddTransaction: (date: string, type: 'credit' | 'debit', accountId?: string | null) => void
-  onTransfer: (date: string) => void
 }) {
   const { t } = useTranslation()
-  const primaryAccountId = day.items.find((item) => item.account_id)?.account_id
   const isLowBalance = day.ending_balance < 0
   const detailed = density === 'detailed'
   const previewItems = detailed ? day.items.slice(0, 3) : []
@@ -274,7 +258,7 @@ function DayCell({
         }
       }}
       className={cn(
-        'group/day relative border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
+        'border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
         detailed ? 'min-h-44' : 'min-h-36',
         !day.in_month && 'bg-muted/20 text-muted-foreground',
         day.in_month && isLowBalance && 'border-rose-300/80 bg-rose-50/75 shadow-[inset_0_0_0_1px_rgba(244,63,94,0.18)] dark:border-rose-500/50 dark:bg-rose-950/25',
@@ -324,22 +308,6 @@ function DayCell({
           )}
         </div>
       )}
-
-      {canWrite && (
-        <div className="pointer-events-none absolute inset-x-2 bottom-2 z-20 opacity-0 transition-opacity group-hover/day:opacity-100 group-focus-within/day:opacity-100">
-          <div className="grid h-9 grid-cols-3 gap-1 rounded-lg border border-border/80 bg-background/95 p-1 shadow-lg backdrop-blur dark:border-slate-600/70 dark:bg-slate-950/90 dark:shadow-[0_0_0_1px_rgba(148,163,184,0.12),0_10px_24px_rgba(0,0,0,0.45)]">
-            <QuickAction label={t('transactions.calendarAddIncome')} onClick={() => onAddTransaction(day.date, 'credit', primaryAccountId)} tone="income">
-              <Plus size={14} />
-            </QuickAction>
-            <QuickAction label={t('transactions.calendarAddExpense')} onClick={() => onAddTransaction(day.date, 'debit', primaryAccountId)} tone="expense">
-              <Minus size={14} />
-            </QuickAction>
-            <QuickAction label={t('transactions.transfer')} onClick={() => onTransfer(day.date)} tone="transfer">
-              <ArrowLeftRight size={14} />
-            </QuickAction>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -366,38 +334,6 @@ function DayPreviewRow({ item, locale, mask }: { item: TransactionCalendarItem; 
         {mask(`${amount >= 0 ? '+' : '−'}${compactCurrency(Math.abs(item.amount), item.currency, locale)}`)}
       </span>
     </div>
-  )
-}
-
-function QuickAction({
-  label,
-  tone,
-  onClick,
-  children,
-}: {
-  label: string
-  tone: 'income' | 'expense' | 'transfer'
-  onClick: () => void
-  children: ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      title={label}
-      aria-label={label}
-      onClick={(event) => {
-        event.stopPropagation()
-        onClick()
-      }}
-      className={cn(
-        'pointer-events-auto inline-flex h-7 items-center justify-center rounded-md border border-border/60 bg-background/70 text-xs font-semibold shadow-sm transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary/40 dark:border-slate-600/60 dark:bg-slate-900/80 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] dark:hover:bg-slate-800',
-        tone === 'income' && 'text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 dark:hover:text-emerald-300',
-        tone === 'expense' && 'text-rose-600 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300',
-        tone === 'transfer' && 'text-sky-600 hover:text-sky-700 dark:text-sky-400 dark:hover:text-sky-300',
-      )}
-    >
-      {children}
-    </button>
   )
 }
 
