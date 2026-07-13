@@ -178,10 +178,10 @@ function CalendarLegend() {
       <LegendItem tone="income" label={t('transactions.summaryIncome')} />
       <LegendItem tone="expense" label={t('transactions.summaryExpenses')} />
       <LegendItem tone="transfer" label={t('transactions.transfer')}>
-        <ArrowLeftRight size={10} />
+        <ArrowLeftRight size={9} />
       </LegendItem>
       <LegendItem tone="projected" label={t('transactions.calendarProjected')}>
-        <CalendarDays size={10} />
+        <CalendarDays size={9} />
       </LegendItem>
     </div>
   )
@@ -262,12 +262,15 @@ function DayCell({
         detailed ? 'min-h-44' : 'min-h-36',
         !day.in_month && 'bg-muted/20 text-muted-foreground',
         day.in_month && isLowBalance && 'border-rose-300/80 bg-rose-50/75 shadow-[inset_0_0_0_1px_rgba(244,63,94,0.18)] dark:border-rose-500/50 dark:bg-rose-950/25',
-        selected && 'z-10 bg-primary/5 ring-2 ring-primary/70 dark:bg-primary/10',
+        // Selection is a ring, not a fill, on low-balance days: tinting the cell
+        // would hide the negative-balance warning exactly when the user opens it.
+        selected && 'z-10 ring-2 ring-primary/70',
+        selected && !isLowBalance && 'bg-primary/5 dark:bg-primary/10',
       )}
     >
-      <div className="flex items-start justify-between gap-2">
+      <div className="flex items-center justify-between gap-1">
         <span className={cn(
-          'inline-flex size-7 items-center justify-center rounded-full text-sm font-bold tabular-nums',
+          'inline-flex size-6 shrink-0 items-center justify-center rounded-full text-sm font-bold tabular-nums',
           today && 'bg-primary text-primary-foreground',
           !today && day.in_month && 'text-foreground',
           !today && !day.in_month && 'text-muted-foreground',
@@ -337,20 +340,23 @@ function DayPreviewRow({ item, locale, mask }: { item: TransactionCalendarItem; 
   )
 }
 
+// Markers stay on one line beside the day number. A cell header is ~100px wide and the
+// date takes 28px, so the four badges are sized to fit the remainder rather than wrap
+// onto a second row, which used to push the balance chip down.
 function CalendarBadges({ day }: { day: TransactionCalendarDay }) {
   const { t } = useTranslation()
   return (
-    <div className="flex flex-wrap justify-end gap-1">
+    <div className="flex shrink-0 items-center gap-0.5">
       {day.has_income && <BadgeDot tone="income" label={t('transactions.summaryIncome')} />}
       {day.has_expense && <BadgeDot tone="expense" label={t('transactions.summaryExpenses')} />}
       {day.has_transfer && (
         <BadgeDot tone="transfer" label={t('transactions.transfer')}>
-          <ArrowLeftRight size={12} />
+          <ArrowLeftRight size={9} />
         </BadgeDot>
       )}
       {day.projected_count > 0 && (
         <BadgeDot tone="projected" label={t('transactions.calendarProjected')}>
-          <CalendarDays size={11} />
+          <CalendarDays size={9} />
         </BadgeDot>
       )}
     </div>
@@ -369,15 +375,16 @@ function BadgeDot({
   return (
     <span
       title={label}
+      aria-label={label}
       className={cn(
-        'inline-flex size-5 items-center justify-center rounded-md border bg-background/80 shadow-sm backdrop-blur',
-        tone === 'income' && 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400',
-        tone === 'expense' && 'border-rose-500/30 text-rose-600 dark:text-rose-400',
-        tone === 'transfer' && 'border-sky-500/30 text-sky-600 dark:text-sky-400',
-        tone === 'projected' && 'border-violet-500/30 text-violet-600 dark:text-violet-300',
+        'inline-flex size-3.5 shrink-0 items-center justify-center rounded border bg-background/80 shadow-sm',
+        tone === 'income' && 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400',
+        tone === 'expense' && 'border-rose-500/40 text-rose-600 dark:text-rose-400',
+        tone === 'transfer' && 'border-sky-500/40 text-sky-600 dark:text-sky-400',
+        tone === 'projected' && 'border-violet-500/40 text-violet-600 dark:text-violet-300',
       )}
     >
-      {children ?? <CircleDot size={11} />}
+      {children ?? <CircleDot size={9} />}
     </span>
   )
 }
