@@ -494,6 +494,7 @@
     "calendarItemCount_plural": "{{count}} записи",
     "calendarProjectedCount": "{{count}} заплановано",
     "calendarProjected": "Заплановано",
+    "calendarBalanceTrend": "Динаміка балансу",
     "calendarLegend": "Легенда",
     "calendarDensity": "Вигляд",
     "calendarCompact": "Компактно",

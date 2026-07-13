@@ -521,6 +521,7 @@
     "calendarItemCount_plural": "{{count}} pozycje",
     "calendarProjectedCount": "{{count}} planowane",
     "calendarProjected": "Planowane",
+    "calendarBalanceTrend": "Trend salda",
     "calendarLegend": "Legenda",
     "calendarDensity": "Widok",
     "calendarCompact": "Kompaktowy",

@@ -36,6 +36,16 @@ function todayIso() {
   return new Date().toISOString().split('T')[0]
 }
 
+// A busy day can hold dozens of rows, and only three fit. Showing the biggest movers
+// makes those three worth reading; showing an arbitrary three did not.
+function itemSize(item: TransactionCalendarItem) {
+  return Math.abs(item.amount_primary ?? item.amount)
+}
+
+function topItemsBySize(items: TransactionCalendarItem[], limit: number) {
+  return [...items].sort((a, b) => itemSize(b) - itemSize(a)).slice(0, limit)
+}
+
 type CalendarMarkerTone = 'income' | 'expense' | 'transfer' | 'projected'
 type CalendarDensity = 'compact' | 'detailed'
 const CALENDAR_DENSITY_STORAGE_KEY = 'securo.transactionCalendar.density'
@@ -117,6 +127,15 @@ export function TransactionCalendarView({
           <CalendarDensityToggle value={density} onChange={setDensity} />
         </div>
 
+        <BalanceTrend
+          days={calendar.days.filter((day) => day.in_month)}
+          currency={calendar.currency}
+          locale={locale}
+          mask={mask}
+          selectedDate={selectedDate}
+          onSelectDate={onSelectedDateChange}
+        />
+
         <div className="hidden md:grid grid-cols-7 border-b border-border bg-muted/30">
           {weekDays.map((day) => (
             <div key={day} className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -166,6 +185,146 @@ export function TransactionCalendarView({
         mask={mask}
         onOpenTransaction={onOpenTransaction}
       />
+    </div>
+  )
+}
+
+// The grid tells you what happened on a day. It cannot show the shape of the month,
+// which is the actual question: when does the balance fall, and does it cross zero.
+// Reading 31 separate numbers to answer that is the thing this strip removes.
+function BalanceTrend({
+  days,
+  currency,
+  locale,
+  mask,
+  selectedDate,
+  onSelectDate,
+}: {
+  days: TransactionCalendarDay[]
+  currency: string
+  locale: string
+  mask: (value: string) => string
+  selectedDate: string
+  onSelectDate: (date: string) => void
+}) {
+  const { t } = useTranslation()
+  const W = 1000
+  const H = 120
+
+  const geometry = useMemo(() => {
+    if (days.length < 2) return null
+    const values = days.map((day) => day.ending_balance)
+    const rawMin = Math.min(...values, 0)
+    const rawMax = Math.max(...values, 0)
+    const pad = (rawMax - rawMin) * 0.12 || Math.abs(rawMax || 1) * 0.12
+    const min = rawMin - pad
+    const max = rawMax + pad
+    const span = max - min || 1
+    const x = (i: number) => (i / (days.length - 1)) * W
+    const y = (v: number) => H - ((v - min) / span) * H
+    const points = days.map((day, i) => ({ x: x(i), y: y(day.ending_balance), day }))
+    const line = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ')
+    const zeroY = y(0)
+    // Close the area on the zero line rather than the bottom edge. Clipped above zero it
+    // paints the surplus green; clipped below it paints only the actual shortfall red.
+    const area = `${line} L${W},${zeroY.toFixed(2)} L0,${zeroY.toFixed(2)} Z`
+    return { points, line, area, zeroY }
+  }, [days])
+
+  if (!geometry) return null
+  const { points, line, area, zeroY } = geometry
+  const selectedPoint = points.find((p) => p.day.date === selectedDate)
+
+  return (
+    <div className="hidden border-b border-border px-4 pb-3 pt-2 sm:px-5 md:block">
+      <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {t('transactions.calendarBalanceTrend')}
+      </p>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="h-16 w-full overflow-visible"
+        role="img"
+        aria-label={t('transactions.calendarBalanceTrend')}
+      >
+        <defs>
+          <linearGradient id="cal-trend-fill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgb(16 185 129)" stopOpacity="0.28" />
+            <stop offset="100%" stopColor="rgb(16 185 129)" stopOpacity="0.02" />
+          </linearGradient>
+          <clipPath id="cal-trend-positive">
+            <rect x="0" y="0" width={W} height={Math.max(0, zeroY)} />
+          </clipPath>
+          {/* Only the stretch that actually dips under zero reads red. */}
+          <clipPath id="cal-trend-negative">
+            <rect x="0" y={zeroY} width={W} height={Math.max(0, H - zeroY)} />
+          </clipPath>
+        </defs>
+
+        <path d={area} fill="url(#cal-trend-fill)" clipPath="url(#cal-trend-positive)" />
+        <path d={area} fill="rgb(244 63 94)" fillOpacity="0.25" clipPath="url(#cal-trend-negative)" />
+
+        <line
+          x1="0"
+          x2={W}
+          y1={zeroY}
+          y2={zeroY}
+          stroke="currentColor"
+          strokeWidth="1"
+          strokeDasharray="4 4"
+          vectorEffect="non-scaling-stroke"
+          className="text-rose-400/70"
+        />
+        <path
+          d={line}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+          className="text-emerald-600 dark:text-emerald-400"
+        />
+
+        {selectedPoint && (
+          <>
+            <line
+              x1={selectedPoint.x}
+              x2={selectedPoint.x}
+              y1="0"
+              y2={H}
+              stroke="currentColor"
+              strokeWidth="1"
+              vectorEffect="non-scaling-stroke"
+              className="text-primary/40"
+            />
+            <circle
+              cx={selectedPoint.x}
+              cy={selectedPoint.y}
+              r="4"
+              vectorEffect="non-scaling-stroke"
+              className="fill-background stroke-primary"
+              strokeWidth="2"
+            />
+          </>
+        )}
+
+        {/* Invisible hit targets: the strip doubles as a way to pick a day. */}
+        {points.map((p, i) => (
+          <rect
+            key={p.day.date}
+            x={i === 0 ? 0 : p.x - W / (points.length - 1) / 2}
+            y="0"
+            width={W / (points.length - 1)}
+            height={H}
+            fill="transparent"
+            className="cursor-pointer"
+            onClick={() => onSelectDate(p.day.date)}
+          >
+            <title>{`${displayDayNumber(p.day.date)} · ${mask(formatCurrency(p.day.ending_balance, currency, locale))}`}</title>
+          </rect>
+        ))}
+      </svg>
     </div>
   )
 }
@@ -244,7 +403,7 @@ function DayCell({
   const { t } = useTranslation()
   const isLowBalance = day.ending_balance < 0
   const detailed = density === 'detailed'
-  const previewItems = detailed ? day.items.slice(0, 3) : []
+  const previewItems = detailed ? topItemsBySize(day.items, 3) : []
   const moreCount = detailed ? Math.max(0, day.items.length - previewItems.length) : 0
   return (
     <div
@@ -259,9 +418,9 @@ function DayCell({
       }}
       className={cn(
         'border-r border-b border-border p-3 text-left transition-colors hover:bg-muted/30 focus:outline-none focus:ring-2 focus:ring-primary/40',
-        detailed ? 'min-h-44' : 'min-h-36',
+        detailed ? 'min-h-44' : 'min-h-24',
         !day.in_month && 'bg-muted/20 text-muted-foreground',
-        day.in_month && isLowBalance && 'border-rose-300/80 bg-rose-50/75 shadow-[inset_0_0_0_1px_rgba(244,63,94,0.18)] dark:border-rose-500/50 dark:bg-rose-950/25',
+        day.in_month && isLowBalance && 'bg-rose-50/60 dark:bg-rose-950/20',
         // Selection is a ring, not a fill, on low-balance days: tinting the cell
         // would hide the negative-balance warning exactly when the user opens it.
         selected && 'z-10 ring-2 ring-primary/70',
@@ -277,17 +436,24 @@ function DayCell({
         )}>
           {displayDayNumber(day.date)}
         </span>
+        {/* Shown in both densities. The rows below only list the top few items, so on a
+            busy day the badges are the only thing reporting the income, transfer or
+            projection buried in the "+N more". */}
         <CalendarBadges day={day} />
       </div>
 
-      <div className="mt-5 flex items-center gap-1.5">
+      {/* The balance is plain text on an ordinary day. Almost every day repeats
+          yesterday's number, so making all of them loud buries the days that matter.
+          Negative days keep the pill; the day it first turns negative is called out
+          in words above the grid rather than with an icon nobody can decode. */}
+      <div className="mt-3 flex items-center gap-1">
         <p
           title={mask(formatCurrency(day.ending_balance, currency, locale))}
           className={cn(
-            'rounded-full border px-2 py-0.5 text-sm font-bold tabular-nums shadow-sm',
+            'whitespace-nowrap text-sm tabular-nums',
             isLowBalance
-              ? 'border-rose-300 bg-rose-100 text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/15 dark:text-rose-300'
-              : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+              ? 'rounded-full border border-rose-300 bg-rose-100 px-1.5 py-0.5 font-bold text-rose-700 dark:border-rose-500/50 dark:bg-rose-500/15 dark:text-rose-300'
+              : 'font-semibold text-muted-foreground',
           )}
         >
           {mask(compactCurrency(day.ending_balance, currency, locale))}

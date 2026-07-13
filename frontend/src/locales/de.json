@@ -494,6 +494,7 @@
     "calendarItemCount_plural": "{{count}} Einträge",
     "calendarProjectedCount": "{{count}} geplant",
     "calendarProjected": "Geplant",
+    "calendarBalanceTrend": "Saldoverlauf",
     "calendarLegend": "Legende",
     "calendarDensity": "Ansicht",
     "calendarCompact": "Kompakt",

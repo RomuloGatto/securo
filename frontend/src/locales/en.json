@@ -494,6 +494,7 @@
     "calendarItemCount_plural": "{{count}} items",
     "calendarProjectedCount": "{{count}} projected",
     "calendarProjected": "Projected",
+    "calendarBalanceTrend": "Balance trend",
     "calendarLegend": "Legend",
     "calendarDensity": "View",
     "calendarCompact": "Compact",
