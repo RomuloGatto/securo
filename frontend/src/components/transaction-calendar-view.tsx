@@ -315,25 +315,25 @@ function DayCell({
   )
 }
 
+// The row is only ~70px wide, which truncated descriptions to two or three characters.
+// That carried no meaning and starved the amount, so the row now shows the category icon
+// and the amount only. The description stays available on hover and in the selected-day
+// panel. Projected items get a dashed border to read as not yet settled.
 function DayPreviewRow({ item, locale, mask }: { item: TransactionCalendarItem; locale: string; mask: (value: string) => string }) {
   const amount = signedAmount(item)
+  const label = [item.description, item.category_name].filter(Boolean).join(' · ')
   return (
     <div
-      title={`${item.description}${item.category_name ? ` · ${item.category_name}` : ''}`}
-      className="flex items-center gap-1.5 rounded-md bg-background/45 px-1.5 py-1 text-[11px] shadow-sm dark:bg-background/25"
+      title={label}
+      className={cn(
+        'flex items-center gap-1.5 rounded-md px-1.5 py-1 text-[11px] shadow-sm',
+        item.kind === 'projected'
+          ? 'border border-dashed border-violet-400/70 bg-violet-500/5 dark:border-violet-400/50'
+          : 'bg-background/45 dark:bg-background/25',
+      )}
     >
-      <CategoryIcon
-        icon={item.category_icon ?? undefined}
-        color={item.category_color ?? undefined}
-        size="xs"
-        // Projected items are ringed rather than given a second icon: the row is
-        // only ~100px wide and an extra glyph starves the description entirely.
-        className={cn(item.kind === 'projected' && 'ring-1 ring-violet-500 dark:ring-violet-400')}
-      />
-      <span className={cn('min-w-0 flex-1 truncate font-medium', item.kind === 'projected' ? 'text-violet-700 dark:text-violet-300' : 'text-foreground')}>
-        {item.description}
-      </span>
-      <span className={cn('shrink-0 font-bold tabular-nums', amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
+      <CategoryIcon icon={item.category_icon ?? undefined} color={item.category_color ?? undefined} size="xs" />
+      <span className={cn('min-w-0 flex-1 truncate text-right font-bold tabular-nums', amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
         {mask(`${amount >= 0 ? '+' : '−'}${compactCurrency(Math.abs(item.amount), item.currency, locale)}`)}
       </span>
     </div>
