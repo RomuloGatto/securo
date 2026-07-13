@@ -36,7 +36,7 @@ function todayIso() {
   return new Date().toISOString().split('T')[0]
 }
 
-type CalendarMarkerTone = 'income' | 'expense' | 'transfer'
+type CalendarMarkerTone = 'income' | 'expense' | 'transfer' | 'projected'
 type CalendarDensity = 'compact' | 'detailed'
 const CALENDAR_DENSITY_STORAGE_KEY = 'securo.transactionCalendar.density'
 
@@ -188,6 +188,9 @@ function CalendarLegend() {
       <LegendItem tone="expense" label={t('transactions.summaryExpenses')} />
       <LegendItem tone="transfer" label={t('transactions.transfer')}>
         <ArrowLeftRight size={10} />
+      </LegendItem>
+      <LegendItem tone="projected" label={t('transactions.calendarProjected')}>
+        <CalendarDays size={10} />
       </LegendItem>
     </div>
   )
@@ -344,12 +347,21 @@ function DayCell({
 function DayPreviewRow({ item, locale, mask }: { item: TransactionCalendarItem; locale: string; mask: (value: string) => string }) {
   const amount = signedAmount(item)
   return (
-    <div className="flex items-center gap-1.5 rounded-md bg-background/45 px-1.5 py-1 text-[11px] shadow-sm dark:bg-background/25">
-      <span className={cn('size-1.5 shrink-0 rounded-full', amount >= 0 ? 'bg-emerald-500' : 'bg-rose-500')} />
-      <span className={cn('min-w-0 flex-1 truncate font-medium', item.kind === 'projected' ? 'text-amber-700 dark:text-amber-300' : 'text-foreground')}>
+    <div
+      title={`${item.description}${item.category_name ? ` · ${item.category_name}` : ''}`}
+      className="flex items-center gap-1.5 rounded-md bg-background/45 px-1.5 py-1 text-[11px] shadow-sm dark:bg-background/25"
+    >
+      <CategoryIcon
+        icon={item.category_icon ?? undefined}
+        color={item.category_color ?? undefined}
+        size="xs"
+        // Projected items are ringed rather than given a second icon: the row is
+        // only ~100px wide and an extra glyph starves the description entirely.
+        className={cn(item.kind === 'projected' && 'ring-1 ring-violet-500 dark:ring-violet-400')}
+      />
+      <span className={cn('min-w-0 flex-1 truncate font-medium', item.kind === 'projected' ? 'text-violet-700 dark:text-violet-300' : 'text-foreground')}>
         {item.description}
       </span>
-      {item.kind === 'projected' && <CalendarDays size={10} className="shrink-0 text-amber-600 dark:text-amber-300" />}
       <span className={cn('shrink-0 font-bold tabular-nums', amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400')}>
         {mask(`${amount >= 0 ? '+' : '−'}${compactCurrency(Math.abs(item.amount), item.currency, locale)}`)}
       </span>
@@ -400,6 +412,11 @@ function CalendarBadges({ day }: { day: TransactionCalendarDay }) {
           <ArrowLeftRight size={12} />
         </BadgeDot>
       )}
+      {day.projected_count > 0 && (
+        <BadgeDot tone="projected" label={t('transactions.calendarProjected')}>
+          <CalendarDays size={11} />
+        </BadgeDot>
+      )}
     </div>
   )
 }
@@ -421,6 +438,7 @@ function BadgeDot({
         tone === 'income' && 'border-emerald-500/30 text-emerald-600 dark:text-emerald-400',
         tone === 'expense' && 'border-rose-500/30 text-rose-600 dark:text-rose-400',
         tone === 'transfer' && 'border-sky-500/30 text-sky-600 dark:text-sky-400',
+        tone === 'projected' && 'border-violet-500/30 text-violet-600 dark:text-violet-300',
       )}
     >
       {children ?? <CircleDot size={11} />}
