@@ -197,6 +197,7 @@ async def passkey_registration_options(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     settings = get_settings()
     existing = await session.execute(select(UserPasskey).where(UserPasskey.user_id == user.id))
     exclude_credentials = [
@@ -235,6 +236,7 @@ async def verify_passkey_registration(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     settings = get_settings()
     challenge = await _pop_challenge(REGISTER_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != str(user.id):

@@ -124,6 +124,12 @@ export function AppLayout() {
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
   useCommandPaletteHotkey(setPaletteOpen)
   const { agentsEnabled } = useFeatureFlags()
+  const { data: oidcConfig } = useQuery({
+    queryKey: ['auth', 'oidc-config'],
+    queryFn: authApi.oidcConfig,
+    staleTime: 60_000,
+  })
+  const localAuthEnabled = oidcConfig?.local_auth_enabled ?? true
 
   // ⌘J / Ctrl+J toggles the global slide-over chat from anywhere.
   // Distinct from ⌘K (command palette) so users can have both open.
@@ -264,6 +270,7 @@ export function AppLayout() {
             onChangePassword={() => setChangePasswordOpen(true)}
             onTwoFactor={() => setTwoFactorOpen(true)}
             onPasskeys={() => setPasskeysOpen(true)}
+            localAuthEnabled={localAuthEnabled}
             agentsEnabled={agentsEnabled}
             backingUp={backingUp}
             onBackup={async () => {
@@ -515,6 +522,7 @@ export function AppLayout() {
               onChangePassword={() => setChangePasswordOpen(true)}
               onTwoFactor={() => setTwoFactorOpen(true)}
               onPasskeys={() => setPasskeysOpen(true)}
+              localAuthEnabled={localAuthEnabled}
               onBackup={async () => {
                 setBackingUp(true)
                 try {
@@ -556,18 +564,22 @@ export function AppLayout() {
       </div>
 
       {showTour && <OnboardingTour onComplete={handleTourComplete} />}
-      <ChangePasswordDialog
-        open={changePasswordOpen}
-        onClose={() => setChangePasswordOpen(false)}
-      />
-      <TwoFactorSetup
-        open={twoFactorOpen}
-        onClose={() => setTwoFactorOpen(false)}
-      />
-      <PasskeyManagementDialog
-        open={passkeysOpen}
-        onClose={() => setPasskeysOpen(false)}
-      />
+      {localAuthEnabled && (
+        <>
+          <ChangePasswordDialog
+            open={changePasswordOpen}
+            onClose={() => setChangePasswordOpen(false)}
+          />
+          <TwoFactorSetup
+            open={twoFactorOpen}
+            onClose={() => setTwoFactorOpen(false)}
+          />
+          <PasskeyManagementDialog
+            open={passkeysOpen}
+            onClose={() => setPasskeysOpen(false)}
+          />
+        </>
+      )}
       <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
       {/* Slide-over global chat — opened from the sidebar pill or via
           ⌘J. The previous floating bottom-right button was removed
@@ -587,6 +599,7 @@ function UserMenu({
   onChangePassword,
   onTwoFactor,
   onPasskeys,
+  localAuthEnabled,
   onBackup,
   backingUp,
   dark,
@@ -598,6 +611,7 @@ function UserMenu({
   onChangePassword: () => void
   onTwoFactor: () => void
   onPasskeys: () => void
+  localAuthEnabled: boolean
   onBackup: () => void
   backingUp: boolean
   dark?: boolean
@@ -637,27 +651,31 @@ function UserMenu({
             <DropdownMenuSeparator />
           </>
         )}
-        <DropdownMenuItem
-          onClick={onChangePassword}
-          className="flex items-center gap-2"
-        >
-          <KeyRound size={14} />
-          {t('auth.changePassword')}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={onTwoFactor}
-          className="flex items-center gap-2"
-        >
-          <ShieldCheck size={14} />
-          {t('auth.twoFactorTitle')}
-        </DropdownMenuItem>
-        <DropdownMenuItem
-          onClick={onPasskeys}
-          className="flex items-center gap-2"
-        >
-          <Fingerprint size={14} />
-          {t('auth.passkeysTitle')}
-        </DropdownMenuItem>
+        {localAuthEnabled && (
+          <>
+            <DropdownMenuItem
+              onClick={onChangePassword}
+              className="flex items-center gap-2"
+            >
+              <KeyRound size={14} />
+              {t('auth.changePassword')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={onTwoFactor}
+              className="flex items-center gap-2"
+            >
+              <ShieldCheck size={14} />
+              {t('auth.twoFactorTitle')}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={onPasskeys}
+              className="flex items-center gap-2"
+            >
+              <Fingerprint size={14} />
+              {t('auth.passkeysTitle')}
+            </DropdownMenuItem>
+          </>
+        )}
         <DropdownMenuItem
           disabled={backingUp}
           onClick={onBackup}
