@@ -468,7 +468,6 @@ async def list_stored_backups(
     session: AsyncSession,
     workspace_id: uuid.UUID,
 ) -> list[BackupItem]:
-    config = await get_backup_config(session, workspace_id)
     dest = _backup_storage_dir()
     items = []
     for path in dest.glob(f"{BACKUP_PREFIX}-*.zip"):
@@ -533,7 +532,6 @@ async def get_stored_backup_bytes(
     workspace_id: uuid.UUID,
     backup_id: str,
 ) -> tuple[str, bytes]:
-    config = await get_backup_config(session, workspace_id)
     path = _backup_path(backup_id)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
