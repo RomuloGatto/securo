@@ -7,9 +7,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { CollectionSelector } from '@/components/collection-selector'
-import { auth as authApi, backup as backupApi, admin as adminApi } from '@/lib/api'
+import { auth as authApi, admin as adminApi } from '@/lib/api'
 import { resolveSupportedLang } from '@/lib/i18n'
-import { toast } from 'sonner'
+
 import { OnboardingTour } from '@/components/onboarding-tour'
 import { useTheme } from 'next-themes'
 import { accounts as accountsApi } from '@/lib/api'
@@ -118,7 +118,6 @@ export function AppLayout() {
   const [changePasswordOpen, setChangePasswordOpen] = useState(false)
   const [twoFactorOpen, setTwoFactorOpen] = useState(false)
   const [passkeysOpen, setPasskeysOpen] = useState(false)
-  const [backingUp, setBackingUp] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [chatOpen, setChatOpen] = useState(false)
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
@@ -265,18 +264,6 @@ export function AppLayout() {
             onTwoFactor={() => setTwoFactorOpen(true)}
             onPasskeys={() => setPasskeysOpen(true)}
             agentsEnabled={agentsEnabled}
-            backingUp={backingUp}
-            onBackup={async () => {
-              setBackingUp(true)
-              try {
-                await backupApi.download()
-                toast.success(t('backup.success'))
-              } catch {
-                toast.error(t('backup.error'))
-              } finally {
-                setBackingUp(false)
-              }
-            }}
             dark
             isAdmin={user?.is_superuser}
           />
@@ -511,21 +498,9 @@ export function AppLayout() {
               account actions that used to live in a separate dropdown. */}
           <div className="px-3 pt-1">
             <WorkspaceSwitcher
-              backingUp={backingUp}
               onChangePassword={() => setChangePasswordOpen(true)}
               onTwoFactor={() => setTwoFactorOpen(true)}
               onPasskeys={() => setPasskeysOpen(true)}
-              onBackup={async () => {
-                setBackingUp(true)
-                try {
-                  await backupApi.download()
-                  toast.success(t('backup.success'))
-                } catch {
-                  toast.error(t('backup.error'))
-                } finally {
-                  setBackingUp(false)
-                }
-              }}
               onUpdateAvailable={() => setUpdateDialogOpen(true)}
               agentsEnabled={agentsEnabled}
             />
@@ -587,8 +562,6 @@ function UserMenu({
   onChangePassword,
   onTwoFactor,
   onPasskeys,
-  onBackup,
-  backingUp,
   dark,
   isAdmin,
   agentsEnabled,
@@ -598,8 +571,6 @@ function UserMenu({
   onChangePassword: () => void
   onTwoFactor: () => void
   onPasskeys: () => void
-  onBackup: () => void
-  backingUp: boolean
   dark?: boolean
   isAdmin?: boolean
   agentsEnabled?: boolean
@@ -659,12 +630,11 @@ function UserMenu({
           {t('auth.passkeysTitle')}
         </DropdownMenuItem>
         <DropdownMenuItem
-          disabled={backingUp}
-          onClick={onBackup}
+          onClick={() => nav('/backups')}
           className="flex items-center gap-2"
         >
           <HardDriveDownload size={14} />
-          {backingUp ? t('backup.downloading') : t('backup.button')}
+          {t('backup.menu')}
         </DropdownMenuItem>
         {agentsEnabled && (
           <DropdownMenuItem

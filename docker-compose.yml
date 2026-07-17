@@ -18,7 +18,7 @@ x-backend-env: &backend-env
   ENABLE_BANKING_APP_ID: ${ENABLE_BANKING_APP_ID:-}
   ENABLE_BANKING_PRIVATE_KEY_FILE: ${ENABLE_BANKING_PRIVATE_KEY_FILE:-/app/secrets/enable_banking_private.pem}
   ENABLE_BANKING_API_URL: ${ENABLE_BANKING_API_URL:-https://api.enablebanking.com}
-  ENABLE_BANKING_OAUTH_REDIRECT_URI: ${ENABLE_BANKING_OAUTH_REDIRECT_URI:-http://localhost:${FRONTEND_PORT:-3000}/oauth/callback}
+  ENABLE_BANKING_OAUTH_REDIRECT_URI: ${ENABLE_BANKING_OAUTH_REDIRECT_URI:-http://localhost:3000/oauth/callback}
   SIMPLEFIN_ENABLED: ${SIMPLEFIN_ENABLED:-false}
   SIMPLEFIN_API_URL: ${SIMPLEFIN_API_URL:-https://beta-bridge.simplefin.org}
   OIDC_ENABLED: ${OIDC_ENABLED:-false}
@@ -78,6 +78,10 @@ x-backend-base: &backend-base
     - ./backend:/app
     - ./secrets:/app/secrets:ro
     - attachments:/app/data/attachments
+    # Managed/scheduled backup ZIPs are written inside containers to /app/data/backups.
+    # Set BACKUP_HOST_PATH to expose that internal directory wherever you want on
+    # the host, e.g. BACKUP_HOST_PATH=/srv/securo/backups.
+    - ${BACKUP_HOST_PATH:-./data/backups}:/app/data/backups
     - agent_knowledge:/app/data/agent_knowledge
     - agent_embedding_models:/app/data/embedding_models
   restart: unless-stopped

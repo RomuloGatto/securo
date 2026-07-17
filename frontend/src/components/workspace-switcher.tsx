@@ -72,16 +72,12 @@ function workspaceColor(w: Workspace): string {
 }
 
 interface AccountMenuProps {
-  /** Backup download in progress — disables the menu item. */
-  backingUp: boolean
   /** Open the change-password dialog. */
   onChangePassword: () => void
   /** Open the 2FA setup dialog. */
   onTwoFactor: () => void
   /** Open the passkey management dialog. */
   onPasskeys: () => void
-  /** Trigger a backup download. */
-  onBackup: () => void
   /** Open the "Update available" dialog. */
   onUpdateAvailable: () => void
   /** True when the AGENTS_ENABLED env flag is on. */
@@ -98,11 +94,9 @@ interface AccountMenuProps {
  * only needs to trigger them.
  */
 export function WorkspaceSwitcher({
-  backingUp,
   onChangePassword,
   onTwoFactor,
   onPasskeys,
-  onBackup,
   onUpdateAvailable,
   agentsEnabled,
 }: AccountMenuProps) {
@@ -253,12 +247,11 @@ export function WorkspaceSwitcher({
             {t('auth.passkeysTitle')}
           </DropdownMenuItem>
           <DropdownMenuItem
-            disabled={backingUp}
-            onClick={onBackup}
+            onClick={() => navigate('/backups')}
             className="flex items-center gap-2"
           >
             <HardDriveDownload size={14} />
-            {backingUp ? t('backup.downloading') : t('backup.button')}
+            {t('backup.menu')}
           </DropdownMenuItem>
 
           {agentsEnabled && (

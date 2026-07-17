@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Navigate, Routes, Route } from 'react-router-dom'
 import { Toaster } from '@/components/ui/sonner'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AuthProvider } from '@/contexts/auth-context'
@@ -19,6 +19,7 @@ const TransactionsPage = lazy(() => import('@/pages/transactions'))
 const AccountsPage = lazy(() => import('@/pages/accounts'))
 const AccountDetailPage = lazy(() => import('@/pages/account-detail'))
 const ImportPage = lazy(() => import('@/pages/import'))
+const BackupPage = lazy(() => import('@/pages/backups'))
 const RulesPage = lazy(() => import('@/pages/rules'))
 const CategoriesPage = lazy(() => import('@/pages/categories'))
 const CollectionsPage = lazy(() => import('@/pages/collections'))
@@ -84,6 +85,8 @@ function App() {
                   <Route path="/oauth/callback" element={<OAuthCallbackPage />} />
                   <Route path="/enable-banking" element={<OAuthCallbackPage />} />
                   <Route path="/import" element={<ImportPage />} />
+                  <Route path="/backup" element={<Navigate to="/backups" replace />} />
+                  <Route path="/backups" element={<BackupPage />} />
                   <Route path="/rules" element={<RulesPage />} />
                   <Route path="/categories" element={<CategoriesPage />} />
                   <Route path="/collections" element={<CollectionsPage />} />
