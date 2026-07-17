@@ -14,6 +14,12 @@ import { useTheme } from 'next-themes'
 import { setThemeBasedOnSystem } from '@/lib/theme-utils'
 import { isPasskeySupported, startPasskeyAuthentication } from '@/lib/webauthn'
 
+type OIDCConfig = {
+  enabled: boolean
+  provider_name: string
+  local_auth_enabled: boolean
+}
+
 export default function LoginPage() {
   const { t } = useTranslation()
   const { login, verify2fa, loginWithToken, token } = useAuth()
@@ -26,7 +32,7 @@ export default function LoginPage() {
   const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
   const [passkeySupported, setPasskeySupported] = useState(false)
   const [registrationEnabled, setRegistrationEnabled] = useState(true)
-  const [oidcConfig, setOidcConfig] = useState<{ enabled: boolean; provider_name: string }>({ enabled: false, provider_name: 'OIDC' })
+  const [oidcConfig, setOidcConfig] = useState<OIDCConfig>({ enabled: false, provider_name: 'OIDC', local_auth_enabled: true })
 
   // 2FA state
   const [requires2fa, setRequires2fa] = useState(false)
@@ -172,6 +178,10 @@ export default function LoginPage() {
     }
   }
 
+  const localAuthEnabled = oidcConfig.local_auth_enabled
+  const showPasskeyLogin = localAuthEnabled && passkeySupported
+  const showAuthDivider = localAuthEnabled && (showPasskeyLogin || oidcConfig.enabled)
+
   if (requires2fa) {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen bg-background px-4">
@@ -282,46 +292,50 @@ export default function LoginPage() {
             <h1 className="text-xl font-semibold tracking-tight">{t('auth.login')}</h1>
             <p className="text-sm text-muted-foreground mt-1">{t('auth.loginDescription')}</p>
           </div>
-          <CardContent className="space-y-4 px-8 pt-4">
-            {error && (
-              <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-lg">
-                {error}
+          {localAuthEnabled && (
+            <CardContent className="space-y-4 px-8 pt-4">
+              {error && (
+                <div className="p-3 text-sm text-destructive bg-destructive/10 rounded-lg">
+                  {error}
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="email" className="text-sm">{t('auth.email')}</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  required
+                />
               </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="password" className="text-sm">{t('auth.password')}</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+            </CardContent>
+          )}
+          <CardFooter className={`flex flex-col gap-4 px-8 pb-8 ${localAuthEnabled ? 'pt-2' : 'pt-6'}`}>
+            {localAuthEnabled && (
+              <Button type="submit" className="w-full" disabled={isLoading || isPasskeyLoading}>
+                {isLoading ? t('common.loading') : t('auth.login')}
+              </Button>
             )}
-            <div className="space-y-1.5">
-              <Label htmlFor="email" className="text-sm">{t('auth.email')}</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                required
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="password" className="text-sm">{t('auth.password')}</Label>
-              <Input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-          </CardContent>
-          <CardFooter className="flex flex-col gap-4 px-8 pb-8 pt-2">
-            <Button type="submit" className="w-full" disabled={isLoading || isPasskeyLoading}>
-              {isLoading ? t('common.loading') : t('auth.login')}
-            </Button>
-            {(passkeySupported || oidcConfig.enabled) && (
+            {showAuthDivider && (
               <div className="flex items-center gap-3 w-full">
                 <div className="h-px flex-1 bg-border" />
                 <span className="text-xs text-muted-foreground">{t('auth.or')}</span>
                 <div className="h-px flex-1 bg-border" />
               </div>
             )}
-            {passkeySupported && (
+            {showPasskeyLogin && (
               <Button
                 type="button"
                 variant="outline"
@@ -333,11 +347,16 @@ export default function LoginPage() {
               </Button>
             )}
             {oidcConfig.enabled && (
-              <Button type="button" variant="outline" className="w-full" onClick={handleOIDCLogin}>
+              <Button
+                type="button"
+                variant={localAuthEnabled ? 'outline' : 'default'}
+                className="w-full"
+                onClick={handleOIDCLogin}
+              >
                 {t('auth.loginWithProvider', { provider: oidcConfig.provider_name })}
               </Button>
             )}
-            {registrationEnabled && (
+            {localAuthEnabled && registrationEnabled && (
               <p className="text-sm text-muted-foreground">
                 {t('auth.noAccount')}{' '}
                 <Link to="/register" className="text-primary font-medium hover:underline">

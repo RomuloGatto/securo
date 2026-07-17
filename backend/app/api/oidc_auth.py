@@ -34,6 +34,7 @@ OIDC_STATE_TTL = 600
 class OIDCConfigResponse(BaseModel):
     enabled: bool
     provider_name: str = "OIDC"
+    local_auth_enabled: bool = True
 
 
 async def _discover() -> dict[str, Any]:
@@ -59,6 +60,7 @@ async def oidc_config():
     return OIDCConfigResponse(
         enabled=bool(settings.oidc_enabled and settings.oidc_client_id and settings.oidc_discovery_url),
         provider_name=settings.oidc_provider_name or "OIDC",
+        local_auth_enabled=settings.local_auth_enabled,
     )
 
 

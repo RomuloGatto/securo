@@ -7,7 +7,20 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.passkey import UserPasskey
+
+
+@pytest.fixture
+def local_auth_disabled():
+    settings = get_settings()
+    old_local_auth_enabled = settings.local_auth_enabled
+    old_oidc_enabled = settings.oidc_enabled
+    settings.oidc_enabled = True
+    settings.local_auth_enabled = False
+    yield settings
+    settings.local_auth_enabled = old_local_auth_enabled
+    settings.oidc_enabled = old_oidc_enabled
 
 
 class _RedisStore:
@@ -494,3 +507,35 @@ async def test_register_verify_deletes_challenge_after_failure(
     _passkey_redis_store.getdel.assert_called_once()
     _passkey_redis_store.delete.assert_not_called()
     assert _passkey_redis_store.store == {}
+
+
+async def test_passkey_login_forbidden_when_local_auth_disabled(client: AsyncClient, local_auth_disabled):
+    options_response = await client.post(
+        "/api/auth/passkeys/authenticate/options",
+        json={"email": "test@example.com"},
+    )
+    assert options_response.status_code == 403
+    assert options_response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+    verify_response = await client.post(
+        "/api/auth/passkeys/authenticate/verify",
+        json={"challenge_id": "missing", "credential": {}},
+    )
+    assert verify_response.status_code == 403
+    assert verify_response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+
+async def test_passkey_second_factor_forbidden_when_local_auth_disabled(client: AsyncClient, local_auth_disabled):
+    options_response = await client.post(
+        "/api/auth/passkeys/2fa/options",
+        json={"temp_token": "missing"},
+    )
+    assert options_response.status_code == 403
+    assert options_response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+    verify_response = await client.post(
+        "/api/auth/passkeys/2fa/verify",
+        json={"temp_token": "missing", "challenge_id": "missing", "credential": {}},
+    )
+    assert verify_response.status_code == 403
+    assert verify_response.json()["detail"] == "LOCAL_AUTH_DISABLED"

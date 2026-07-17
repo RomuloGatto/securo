@@ -43,6 +43,7 @@ secret:
 # Non-sensitive configuration
 config:
   debug: "false"
+  localAuthEnabled: "true"
   # Leave empty to auto-compute from global.domain (e.g. http://securo.local/oauth/callback)
   pluggyOauthRedirectUri: ""
   enableBankingApiUrl: "https://api.enablebanking.com"

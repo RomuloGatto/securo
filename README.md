@@ -114,6 +114,8 @@ OIDC_CLIENT_SECRET=your-client-secret
 OIDC_REDIRECT_URI=https://your-securo-host/api/auth/oidc/callback
 ```
 
+To require SSO-only access after OIDC is configured, set `LOCAL_AUTH_ENABLED=false`. Securo will reject password and passkey login endpoints and the login page will show only the configured OIDC provider button. This setting requires `OIDC_ENABLED=true` so an instance cannot accidentally start with every login method disabled.
+
 New OIDC users are auto-provisioned by default (`OIDC_AUTO_REGISTER=true`) using verified email addresses. Set `OIDC_AUTO_REGISTER=false` to allow only existing Securo users whose email matches the provider claim.
 
 ### Optional OIDC role sync

@@ -1,6 +1,21 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.config import get_settings
+
+
+@pytest.fixture
+def oidc_only_settings():
+    settings = get_settings()
+    old = settings.model_dump()
+    settings.oidc_enabled = True
+    settings.oidc_discovery_url = "https://id.example.com/.well-known/openid-configuration"
+    settings.oidc_client_id = "securo"
+    settings.local_auth_enabled = False
+    yield settings
+    for key, value in old.items():
+        setattr(settings, key, value)
+
 
 @pytest.mark.asyncio
 async def test_register(client: AsyncClient, clean_db):
@@ -60,3 +75,15 @@ async def test_get_me(client: AsyncClient, auth_headers):
 async def test_get_me_unauthenticated(client: AsyncClient, clean_db):
     response = await client.get("/api/users/me")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_forbidden_when_local_auth_disabled(client: AsyncClient, test_user, oidc_only_settings):
+    response = await client.post(
+        "/api/auth/login",
+        data={"username": "test@example.com", "password": "testpass123"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "LOCAL_AUTH_DISABLED"

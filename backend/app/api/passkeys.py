@@ -80,6 +80,11 @@ def _challenge_key(prefix: str, challenge_id: str) -> str:
     return f"{prefix}:{challenge_id}"
 
 
+def _ensure_local_auth_enabled() -> None:
+    if not get_settings().local_auth_enabled:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LOCAL_AUTH_DISABLED")
+
+
 async def _get_second_factor_user_id(temp_token: str) -> str:
     redis = await get_redis()
     raw_payload = await redis.get(f"2fa_temp:{temp_token}")
@@ -294,6 +299,7 @@ async def passkey_authentication_options(
     body: PasskeyAuthenticateOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     settings = get_settings()
     email = body.email.strip().lower() if body.email else None
     expected_user_id: str | None = None
@@ -324,6 +330,7 @@ async def verify_passkey_authentication(
     body: PasskeyAuthenticateVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     challenge = await _pop_challenge(AUTHENTICATE_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
@@ -359,6 +366,7 @@ async def passkey_second_factor_options(
     body: PasskeySecondFactorOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     settings = get_settings()
     user_id = await _get_second_factor_user_id(body.temp_token)
     result = await session.execute(
@@ -388,6 +396,7 @@ async def verify_passkey_second_factor(
     body: PasskeySecondFactorVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
+    _ensure_local_auth_enabled()
     user_id = await _get_second_factor_user_id(body.temp_token)
     challenge = await _pop_challenge(SECOND_FACTOR_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != user_id:

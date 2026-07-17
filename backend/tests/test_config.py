@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 import pytest
 
 from app.core.config import Settings
@@ -73,3 +73,24 @@ def test_multiple_secrets_dirs_merge(tmp_path: Path):
             value = value.get_secret_value()
 
         assert value == expectedValue
+
+
+def test_local_auth_enabled_defaults_true(secrets: Path):
+    settings = Settings(_secrets_dir=str(secrets))
+
+    assert settings.local_auth_enabled is True
+
+
+def test_local_auth_can_be_disabled_when_oidc_is_enabled(secrets: Path):
+    settings = Settings(
+        oidc_enabled=True,
+        local_auth_enabled=False,
+        _secrets_dir=str(secrets),
+    )
+
+    assert settings.local_auth_enabled is False
+
+
+def test_local_auth_disabled_requires_oidc(secrets: Path):
+    with pytest.raises(ValidationError, match="LOCAL_AUTH_ENABLED=false requires OIDC_ENABLED=true"):
+        Settings(local_auth_enabled=False, _secrets_dir=str(secrets))
