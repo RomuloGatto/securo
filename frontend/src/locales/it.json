@@ -1210,6 +1210,7 @@
   },
   "common": {
     "view": "Visualizza",
+    "add": "Aggiungi",
     "save": "Salva",
     "saving": "Salvataggio…",
     "cancel": "Annulla",
