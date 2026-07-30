@@ -1,7 +1,15 @@
 from functools import lru_cache
-from urllib.parse import urlparse
+from os import getenv
+from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Use the same environment variable that systemd uses: https://systemd.io/CREDENTIALS/
+# If not defined, defaults to docker secrets defaults (https://docs.docker.com/compose/how-tos/use-secrets/)
+CREDENTIALS_DIRECTORY: list[Path] = [
+    Path(p) for p in getenv("CREDENTIALS_DIRECTORY", "/run/secrets").split(":") if p
+]
 
 
 class Settings(BaseSettings):
@@ -13,18 +21,18 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/securo"
 
     # Auth
-    secret_key: str = "change-me-in-production"
+    secret_key: SecretStr = SecretStr("change-me-in-production")
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 24  # 24 hours
 
     # Pluggy
     pluggy_client_id: str = ""
-    pluggy_client_secret: str = ""
+    pluggy_client_secret: SecretStr = SecretStr("")
     pluggy_oauth_redirect_uri: str = "http://localhost:5173/oauth/callback"
 
     # Enable Banking (European PSD2 banks)
     enable_banking_app_id: str = ""
-    enable_banking_private_key: str = ""  # raw PEM; supports \n-escaped envs
+    enable_banking_private_key: SecretStr = SecretStr("")  # raw PEM; supports \n-escaped envs
     enable_banking_private_key_file: str = ""  # path to PEM file; takes precedence
     enable_banking_api_url: str = "https://api.enablebanking.com"
     enable_banking_oauth_redirect_uri: str = "http://localhost:5173/oauth/callback"
@@ -40,22 +48,14 @@ class Settings(BaseSettings):
 
     # WebAuthn / passkeys
     webauthn_rp_name: str = "Securo"
-    # Empty means derive from frontend_url host, e.g. localhost for http://localhost:5173.
+    # Empty means the RP ID follows the domain the browser is on, which is what
+    # most deployments want. Set it to pin passkeys to one domain (e.g.
+    # securo.example.com); requests from other origins are then rejected.
     webauthn_rp_id: str = ""
-    # Empty means use frontend_url. Must match the browser origin exactly.
+    # Empty means the expected origin follows the browser. Only set this when the
+    # app is reached at exactly one origin and you want it enforced.
     webauthn_origin: str = ""
     webauthn_challenge_ttl_seconds: int = 300
-
-    @property
-    def resolved_webauthn_origin(self) -> str:
-        return self.webauthn_origin or self.frontend_url
-
-    @property
-    def resolved_webauthn_rp_id(self) -> str:
-        if self.webauthn_rp_id:
-            return self.webauthn_rp_id
-        parsed = urlparse(self.frontend_url)
-        return parsed.hostname or "localhost"
 
     # Defaults
     default_currency: str = "USD"  # fallback currency when user preference is unavailable
@@ -75,8 +75,8 @@ class Settings(BaseSettings):
     # S3 Storage (for future use)
     storage_s3_bucket: str = ""
     storage_s3_region: str = ""
-    storage_s3_access_key: str = ""
-    storage_s3_secret_key: str = ""
+    storage_s3_access_key: SecretStr = SecretStr("")
+    storage_s3_secret_key: SecretStr = SecretStr("")
     storage_s3_endpoint_url: str = ""  # for S3-compatible services (MinIO, DigitalOcean Spaces)
 
     # Registration
@@ -85,9 +85,11 @@ class Settings(BaseSettings):
     # OIDC login (works with Authentik, Pocket ID, and other standard OIDC providers)
     oidc_enabled: bool = False
     oidc_provider_name: str = "OIDC"
-    oidc_discovery_url: str = ""  # e.g. https://auth.example.com/application/o/securo/.well-known/openid-configuration
+    oidc_discovery_url: str = (
+        ""  # e.g. https://auth.example.com/application/o/securo/.well-known/openid-configuration
+    )
     oidc_client_id: str = ""
-    oidc_client_secret: str = ""
+    oidc_client_secret: SecretStr = SecretStr("")
     oidc_redirect_uri: str = ""  # defaults to {FRONTEND_URL}/api/auth/oidc/callback
     oidc_scopes: str = "openid email profile"
     oidc_auto_register: bool = True
@@ -115,7 +117,7 @@ class Settings(BaseSettings):
     # external dependency on the Brazilian government endpoint).
     tesouro_direto_enabled: bool = True
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", secrets_dir=CREDENTIALS_DIRECTORY)
 
 
 @lru_cache

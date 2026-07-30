@@ -70,7 +70,7 @@ export function TransactionDrillDown({
         from: filter?.from,
         to: filter?.to,
         limit: 200,
-        exclude_transfers: true,
+        user_pnl_only: true,
       }),
     enabled: !!filter,
   })
@@ -208,6 +208,7 @@ export function TransactionDrillDown({
           <button
             onClick={onClose}
             className="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            title={t('common.close')}
           >
             <X size={16} />
           </button>

@@ -333,11 +333,13 @@ export const connections = {
     provider: string,
     state?: string,
     settings?: Pick<ConnectionSettings, 'sync_assets'>,
+    reconnectConnectionId?: string,
   ): Promise<BankConnection> => {
     const { data } = await api.post('/connections/oauth/callback', {
       code,
       provider,
       state,
+      reconnect_connection_id: reconnectConnectionId,
       ...settings,
     })
     return data
@@ -438,6 +440,7 @@ export const transactions = {
     limit?: number
     include_opening_balance?: boolean
     exclude_transfers?: boolean
+    user_pnl_only?: boolean
     tags?: string[]
     min_amount?: number
     max_amount?: number
@@ -604,11 +607,13 @@ export const transactions = {
     account_ids?: string[]
     category_id?: string
     category_ids?: string[]
+    payee_id?: string
     uncategorized?: boolean
     type?: string
     from?: string
     to?: string
     q?: string
+    tags?: string[]
     transaction_ids?: string[]
   }): Promise<void> => {
     const { data } = await api.get('/transactions/export', {
@@ -1119,9 +1124,11 @@ export const reports = {
     })
     return data
   },
-  incomeExpenses: async (months = 12, interval = 'monthly', accountIds?: string[], period?: 'ytd'): Promise<ReportResponse> => {
+  // `days` requests an exact rolling window ending today, instead of the
+  // month-aligned window `months` produces.
+  incomeExpenses: async (months = 12, interval = 'monthly', accountIds?: string[], period?: 'ytd', days?: number): Promise<ReportResponse> => {
     const extra = acctIdsParam(accountIds)
-    const { data } = await api.get('/reports/income-expenses', { params: { months, interval, period, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
+    const { data } = await api.get('/reports/income-expenses', { params: { months, interval, period, days, ...(extra.params ?? {}) }, ...(extra.paramsSerializer ? { paramsSerializer: extra.paramsSerializer } : {}) })
     return data
   },
   cashFlow: async (months = 6, interval = 'daily', baseline = false, accountIds?: string[]): Promise<ReportResponse> => {
@@ -1394,6 +1401,7 @@ export const agents = {
       default_similarity_threshold: number
       extra_mcp_servers_configured: boolean
       mcp_external_ttl_days: number
+      external_mcp_url: string
     }
   },
   mcpTokens: {

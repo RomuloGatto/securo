@@ -237,6 +237,7 @@ async def _upsert_asset_from_holding(
             purchase_price=holding.purchase_price,
             purchase_date=holding.purchase_date,
             isin=holding.isin,
+            ticker=holding.ticker,
             maturity_date=holding.maturity_date,
             external_metadata=holding.metadata,
             valuation_method="manual",
@@ -269,6 +270,8 @@ async def _upsert_asset_from_holding(
         asset.purchase_date = holding.purchase_date
     if holding.isin:
         asset.isin = holding.isin
+    if holding.ticker:
+        asset.ticker = holding.ticker
     if holding.maturity_date:
         asset.maturity_date = holding.maturity_date
     return asset
@@ -501,6 +504,7 @@ async def handle_oauth_callback(
     provider_name: Optional[str] = None,
     state: Optional[str] = None,
     sync_assets: Optional[bool] = None,
+    reconnect_connection_id: Optional[uuid.UUID] = None,
 ) -> BankConnection:
     state_payload: dict = {}
     if state:
@@ -514,29 +518,38 @@ async def handle_oauth_callback(
             raise ValueError("OAuth state workspace does not match active workspace")
         state_payload = consumed
         provider_name = consumed.get("provider") or provider_name
+    reconnect_id = state_payload.get("reconnect_connection_id") or reconnect_connection_id
+    existing_reconnect: BankConnection | None = None
+    if reconnect_id:
+        existing_reconnect = await session.get(BankConnection, uuid.UUID(str(reconnect_id)))
+        if not existing_reconnect or existing_reconnect.workspace_id != workspace_id:
+            raise ValueError("Reconnect target connection not found")
+        # Token reconnects do not carry OAuth state, so the request body may be
+        # the only source of provider_name. Never allow a pasted token for one
+        # provider to overwrite another provider's stored credentials.
+        if provider_name and provider_name != existing_reconnect.provider:
+            raise ValueError("Reconnect provider does not match target connection")
+        provider_name = existing_reconnect.provider
+
     if not provider_name:
         raise ValueError("OAuth callback missing provider")
 
     provider = get_provider(provider_name)
     connection_data = await provider.handle_oauth_callback(code)
 
-    reconnect_id = state_payload.get("reconnect_connection_id")
-    if reconnect_id:
-        existing = await session.get(BankConnection, uuid.UUID(reconnect_id))
-        if not existing or existing.workspace_id != workspace_id:
-            raise ValueError("Reconnect target connection not found")
-        existing.external_id = connection_data.external_id
-        existing.institution_name = (
-            connection_data.institution_name or existing.institution_name
+    if existing_reconnect:
+        existing_reconnect.external_id = connection_data.external_id
+        existing_reconnect.institution_name = (
+            connection_data.institution_name or existing_reconnect.institution_name
         )
-        existing.logo_url = _clean_logo_url(connection_data.logo_url) or existing.logo_url
-        existing.credentials = connection_data.credentials
-        existing.status = "active"
+        existing_reconnect.logo_url = _clean_logo_url(connection_data.logo_url) or existing_reconnect.logo_url
+        existing_reconnect.credentials = connection_data.credentials
+        existing_reconnect.status = "active"
         # Re-sync from current data on next sync cycle.
-        existing.last_sync_at = None
+        existing_reconnect.last_sync_at = None
         await session.commit()
-        await session.refresh(existing)
-        return existing
+        await session.refresh(existing_reconnect)
+        return existing_reconnect
 
     flow_params = dict(state_payload.get("flow_params") or {})
     flow_sync_assets = flow_params.pop("sync_assets", None)
@@ -574,6 +587,7 @@ async def handle_oauth_callback(
             connection_id=connection.id,
             external_id=acc_data.external_id,
             name=acc_data.name,
+            masked_number=acc_data.masked_number,
             type=acc_data.type,
             balance=acc_data.balance,
             currency=acc_data.currency,
@@ -624,7 +638,9 @@ async def handle_oauth_callback(
             # Resolve payee entity from raw payee text
             payee_id = None
             if txn_data.payee:
-                payee_entity = await get_or_create_payee(session, user_id, txn_data.payee)
+                payee_entity = await get_or_create_payee(
+                    session, user_id, txn_data.payee, workspace_id=workspace_id
+                )
                 payee_id = payee_entity.id
 
             bill = (
@@ -1003,6 +1019,7 @@ async def _sync_bill_finance_charges(
         else:
             tx = Transaction(
                 user_id=user_id,
+                workspace_id=account.workspace_id,
                 account_id=account.id,
                 external_id=external_id,
                 description=description,
@@ -1199,6 +1216,11 @@ async def sync_connection(
                     connection.provider, account.type, acc_data.balance
                 )
                 account.name = acc_data.name
+                # Backfills existing accounts on their next sync. Only written
+                # when the provider actually returns an identifier, so a payload
+                # that intermittently omits it can't blank out a known mask.
+                if acc_data.masked_number is not None:
+                    account.masked_number = acc_data.masked_number
                 if acc_data.type == "credit_card":
                     # Preserve existing CC metadata when the provider doesn't
                     # expose it. Pluggy's creditData fields (limit, close/due
@@ -1226,6 +1248,7 @@ async def sync_connection(
                     connection_id=connection.id,
                     external_id=acc_data.external_id,
                     name=acc_data.name,
+                    masked_number=acc_data.masked_number,
                     type=acc_data.type,
                     balance=acc_data.balance,
                     currency=acc_data.currency,
@@ -1265,12 +1288,21 @@ async def sync_connection(
 
             for txn_data in transactions_data:
                 existing = await session.execute(
-                    select(Transaction).where(
+                    select(Transaction)
+                    .where(
                         Transaction.account_id == account.id,
                         Transaction.external_id == txn_data.external_id,
                     )
+                    .order_by(Transaction.created_at)
                 )
-                existing_tx = existing.scalar_one_or_none()
+                # `.first()` rather than `.scalar_one_or_none()`: a prior sync
+                # race (two overlapping passes both select-then-insert the same
+                # external_id before either commits) can leave two rows sharing
+                # (account_id, external_id). scalar_one_or_none() would raise
+                # MultipleResultsFound and abort the whole connection's sync;
+                # we instead reconcile onto the oldest matching row and skip
+                # re-inserting, so a stray duplicate is harmless and never grows.
+                existing_tx = existing.scalars().first()
                 if existing_tx:
                     # User-flagged rows are frozen: skip status/bill drift so
                     # a re-sync can't revive a transaction the user hid.
@@ -1372,7 +1404,9 @@ async def sync_connection(
                 # Resolve payee entity from raw payee text
                 sync_payee_id = None
                 if txn_data.payee:
-                    sync_payee_entity = await get_or_create_payee(session, user_id, txn_data.payee)
+                    sync_payee_entity = await get_or_create_payee(
+                        session, user_id, txn_data.payee, workspace_id=workspace_id
+                    )
                     sync_payee_id = sync_payee_entity.id
 
                 # No placeholder existed: if this charge fulfills an active bill's
@@ -1470,10 +1504,15 @@ async def sync_connection(
                 conn.status = "expired"
         raise
     except ProviderUserActionRequired:
-        # User must act in the provider's portal (e.g. EB restricted-mode
-        # account linking). Don't mark the connection errored — propagate
-        # so the API layer can surface the specific code to the UI.
+        # Stale/revoked provider credentials require a non-destructive
+        # reconnect path. Mark the connection unhealthy so the accounts page
+        # shows the reconnect banner, then let the API return a typed 409
+        # instead of a generic 500.
         await session.rollback()
+        async with session.begin():
+            conn = await session.get(BankConnection, connection_id)
+            if conn:
+                conn.status = "error"
         raise
     except ProviderRateLimited:
         # The bank/aggregator is throttling data requests (PSD2 caps unattended

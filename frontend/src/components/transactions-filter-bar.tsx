@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { getAccountName } from '@/lib/account-utils'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
-import { format, startOfMonth, startOfYear, subDays } from 'date-fns'
+import { startOfMonth, startOfYear, subDays } from 'date-fns'
 import {
   ArrowUpDown,
   Calendar as CalendarIcon,
@@ -39,8 +39,13 @@ import {
 import { Calendar } from '@/components/ui/calendar'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { localDateString } from '@/lib/date-utils'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
 import { CategoryFilterContent } from '@/components/category-filter-content'
+import {
+  MobileTransactionsFilterMenu,
+  type MobileFilterView,
+} from '@/components/mobile-transactions-filter-menu'
 import type { Account, Category, CategoryGroup, Group, Payee } from '@/types'
 
 interface TransactionsFilterBarProps {
@@ -72,10 +77,6 @@ interface TransactionsFilterBarProps {
   categoryGroups: CategoryGroup[]
   payees: Payee[]
   groups: Group[]
-}
-
-function toISODate(d: Date): string {
-  return format(d, 'yyyy-MM-dd')
 }
 
 function toggleInArray(arr: string[], id: string): string[] {
@@ -127,6 +128,7 @@ export function TransactionsFilterBar({
   const [amountSubOpen, setAmountSubOpen] = useState(false)
   const [draftMinAmount, setDraftMinAmount] = useState<string>(filterMinAmount)
   const [draftMaxAmount, setDraftMaxAmount] = useState<string>(filterMaxAmount)
+  const [mobileFilterView, setMobileFilterView] = useState<MobileFilterView>('root')
   const searchRef = useRef<HTMLInputElement>(null)
 
   // When a CheckRow is clicked inside a submenu, Radix tries to close the submenu
@@ -153,6 +155,7 @@ export function TransactionsFilterBar({
       setAccountSubOpen(false)
       setCategorySubOpen(false)
       setAmountSubOpen(false)
+      setMobileFilterView('root')
       keepAccountSubOpenRef.current = false
       keepCategorySubOpenRef.current = false
     }
@@ -261,38 +264,38 @@ export function TransactionsFilterBar({
       {
         key: 'today',
         label: t('transactions.filtersBar.datePresets.today'),
-        from: toISODate(today),
-        to: toISODate(today),
+        from: localDateString(today),
+        to: localDateString(today),
       },
       {
         key: 'last7',
         label: t('transactions.filtersBar.datePresets.last7'),
-        from: toISODate(subDays(today, 6)),
-        to: toISODate(today),
+        from: localDateString(subDays(today, 6)),
+        to: localDateString(today),
       },
       {
         key: 'last30',
         label: t('transactions.filtersBar.datePresets.last30'),
-        from: toISODate(subDays(today, 29)),
-        to: toISODate(today),
+        from: localDateString(subDays(today, 29)),
+        to: localDateString(today),
       },
       {
         key: 'thisMonth',
         label: t('transactions.filtersBar.datePresets.thisMonth'),
-        from: toISODate(startOfMonth(today)),
-        to: toISODate(today),
+        from: localDateString(startOfMonth(today)),
+        to: localDateString(today),
       },
       {
         key: 'last90',
         label: t('transactions.filtersBar.datePresets.last90'),
-        from: toISODate(subDays(today, 89)),
-        to: toISODate(today),
+        from: localDateString(subDays(today, 89)),
+        to: localDateString(today),
       },
       {
         key: 'thisYear',
         label: t('transactions.filtersBar.datePresets.thisYear'),
-        from: toISODate(startOfYear(today)),
-        to: toISODate(today),
+        from: localDateString(startOfYear(today)),
+        to: localDateString(today),
       },
     ]
   }, [t])
@@ -322,7 +325,6 @@ export function TransactionsFilterBar({
       return categoryById.get(filterCategoryIds[0])?.name ?? ''
     return ''
   })()
-
   return (
     <div className="mb-4">
       <Popover open={dateCustomOpen} onOpenChange={setDateCustomOpen} modal={true}>
@@ -378,8 +380,56 @@ export function TransactionsFilterBar({
             <DropdownMenuContent
               align="end"
               sideOffset={6}
-              className="w-[240px] p-1"
+              className="w-[min(18rem,calc(100vw-2rem))] p-1 sm:w-[240px]"
             >
+              <MobileTransactionsFilterMenu
+                view={mobileFilterView}
+                setView={setMobileFilterView}
+                setMenuOpen={setMenuOpen}
+                accounts={accounts}
+                categories={categories}
+                categoryGroups={categoryGroups}
+                payees={payees}
+                groups={groups}
+                accountIds={filterAccountIds}
+                categoryIds={filterCategoryIds}
+                uncategorized={filterUncategorized}
+                payeeId={filterPayee}
+                groupId={filterGroupId}
+                type={filterType}
+                from={filterFrom}
+                to={filterTo}
+                minAmount={draftMinAmount}
+                maxAmount={draftMaxAmount}
+                appliedMinAmount={filterMinAmount}
+                appliedMaxAmount={filterMaxAmount}
+                setMinAmount={setDraftMinAmount}
+                setMaxAmount={setDraftMaxAmount}
+                summaries={{
+                  account: accountSummary,
+                  category: categorySummary,
+                  payee: selectedPayee?.name,
+                  group: selectedGroup?.name,
+                  type: typeLabel,
+                  date: dateLabel,
+                  amount: amountLabel,
+                }}
+                datePresets={datePresets}
+                hasAnyFilter={hasAnyFilter}
+                onAccountIdsChange={onAccountIdsChange}
+                onCategoryIdsChange={onCategoryIdsChange}
+                onUncategorizedChange={onUncategorizedChange}
+                onPayeeChange={onPayeeChange}
+                onGroupIdChange={onGroupIdChange}
+                onTypeChange={onTypeChange}
+                onDateRangeChange={onDateRangeChange}
+                onAmountRangeChange={onAmountRangeChange}
+                onApplyAmountRange={applyAmountRange}
+                onOpenCustomRange={openCustomRange}
+                onClearAll={onClearAll}
+              />
+
+              <div className="hidden sm:block">
               <DropdownMenuLabel className="px-2 py-1 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/70">
                 {t('transactions.filtersBar.filterBy')}
               </DropdownMenuLabel>
@@ -869,6 +919,7 @@ export function TransactionsFilterBar({
                   </DropdownMenuItem>
                 </>
               )}
+              </div>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
@@ -989,7 +1040,7 @@ export function TransactionsFilterBar({
                   draftFrom ? new Date(draftFrom + 'T00:00:00') : new Date()
                 }
                 locale={dateFnsLocale}
-                onSelect={(d) => setDraftFrom(d ? toISODate(d) : '')}
+                onSelect={(d) => setDraftFrom(d ? localDateString(d) : '')}
               />
             </div>
             <div className="sm:pl-2">
@@ -1006,7 +1057,7 @@ export function TransactionsFilterBar({
                       : new Date()
                 }
                 locale={dateFnsLocale}
-                onSelect={(d) => setDraftTo(d ? toISODate(d) : '')}
+                onSelect={(d) => setDraftTo(d ? localDateString(d) : '')}
               />
             </div>
           </div>

@@ -202,8 +202,14 @@
     "passkeySecondFactorPrompt": "Haz clic en el botón de abajo y sigue la solicitud de llave de seguridad del navegador.",
     "passkeysTitle": "Llaves de acceso",
     "passkeysDescription": "Usa llaves de seguridad o llaves de acceso del dispositivo para iniciar sesión sin introducir la contraseña. Las llaves registradas también protegen el inicio con contraseña como segundo factor; el inicio solo con llave omite el código autenticador porque la llave ya verifica la posesión.",
-    "passkeyUnsupported": "Las llaves de acceso requieren un navegador compatible y una conexión HTTPS segura o localhost.",
     "passkeyLoadError": "No se pudieron cargar las llaves de acceso",
+    "passkeyUnsupported": "Este navegador no admite passkeys.",
+    "passkeyInsecureContext": "Las passkeys requieren una conexión segura. Abre Securo por HTTPS o en http://localhost.",
+    "passkeyIpAddress": "Las passkeys no funcionan en una dirección IP. Abre Securo en un dominio por HTTPS o en http://localhost.",
+    "passkeyDomainError": "Tu navegador rechazó este dominio para passkeys. Abre Securo en el dominio configurado, por HTTPS.",
+    "passkeyDomainMismatch": "Esta dirección está fuera del dominio de passkeys configurado en el servidor (WEBAUTHN_RP_ID).",
+    "passkeyDuplicate": "Este dispositivo ya tiene una passkey para tu cuenta.",
+    "passkeyWaiting": "Esperando a tu dispositivo...",
     "passkeyName": "Nombre de la llave de acceso",
     "passkeyNamePlaceholder": "p. ej. YubiKey, Touch ID de MacBook",
     "defaultPasskeyName": "Llave de acceso",
@@ -481,6 +487,7 @@
       }
     },
     "bulkAddTags": "Añadir etiquetas",
+    "bulkRemoveTags": "Eliminar etiquetas",
     "addTagsPlaceholder": "#etiqueta…",
     "clearOverride": "Borrar anulación",
     "listView": "Lista",
@@ -627,7 +634,10 @@
       "simplefin": {
         "title": "Conectar vía SimpleFIN",
         "description": "SimpleFIN es un protocolo de datos bancarios de solo lectura. Ve al SimpleFIN Bridge, elige tu banco y copia el token de configuración aquí."
-      }
+      },
+      "reconnectTitle": "Reconectar con un token nuevo",
+      "reconnectDescription": "Pega un token de configuración nuevo para actualizar esta conexión sin reemplazarla. Se conservan cuentas, transacciones, categorías y reglas existentes.",
+      "reconnect": "Reconectar"
     },
     "providers": {
       "pluggy": {
@@ -639,7 +649,8 @@
       "simplefin": {
         "description": "Bancos de EE. UU. e internacionales vía SimpleFIN Bridge"
       }
-    }
+    },
+    "reconnected": "Banco reconectado correctamente"
   },
   "connections": {
     "settings": "Configuración de la conexión",
@@ -734,6 +745,9 @@
     "resume": "Reanudar",
     "complete": "Marcar como completado",
     "archive": "Archivar",
+    "reactivate": "Reactivar",
+    "confirmDeleteTitle": "¿Eliminar objetivo?",
+    "confirmDeleteDesc": "\"{{name}}\" se eliminará permanentemente. Esta acción es irreversible.",
     "viewAll": "Ver todos los objetivos",
     "dashboardTitle": "Progreso de objetivos",
     "noTargetDate": "Sin fecha límite",
@@ -791,7 +805,8 @@
     "createMissingCategories": "Crear también las categorías predeterminadas que necesita el paquete",
     "duplicateName": "Ya existe una regla con este nombre",
     "sectionTitle": "Reglas de categorización",
-    "reapplyAll": "Reaplicar todo",
+    "resetAndReapplyAll": "Restablecer y reaplicar",
+    "confirmResetAndReapplyAll": "¿Restablecer categorías y notas de las transacciones coincidentes y reaplicar todas las reglas activas?",
     "add": "Agregar",
     "created": "Regla creada",
     "createdAndApplied": "Regla creada y aplicada a {{count}} transacciones",
@@ -807,6 +822,8 @@
     "priority": "Prioridad",
     "conditions": "Condiciones",
     "actions": "Acciones",
+    "applyToExisting": "Aplicar acciones coincidentes a transacciones existentes",
+    "overwriteExistingCategories": "También reemplazar categorías existentes",
     "andOp": "Y",
     "orOp": "O",
     "addCondition": "Agregar condición",
@@ -1086,6 +1103,10 @@
     "syncedFromHint": "Sincronizado originalmente desde {{source}} — puedes renombrarlo libremente, la coincidencia de sincronización usa el ID de conexión.",
     "chartByWallet": "Por cartera",
     "chartByAsset": "Por activo",
+    "chartGroupMode": "Agrupación del gráfico",
+    "chartDrawMode": "Trazado del gráfico",
+    "chartStacked": "Apilado",
+    "chartLines": "Líneas",
     "portfolioValue": "Valor de la cartera",
     "total": "Total",
     "confirmRegenerateTitle": "¿Regenerar valores?",
@@ -1166,6 +1187,8 @@
     "range30d": "30D"
   },
   "payees": {
+    "addFavorite": "Añadir a favoritos",
+    "removeFavorite": "Quitar de favoritos",
     "title": "Beneficiarios",
     "section": "Configuración",
     "payee": "Beneficiario",
@@ -1201,16 +1224,21 @@
     "favoritesOnly": "Solo favoritos"
   },
   "common": {
+    "view": "Ver",
+    "add": "Añadir",
     "save": "Guardar",
+    "saving": "Guardando…",
     "cancel": "Cancelar",
     "close": "Cerrar",
     "more": "Más acciones",
+    "userMenu": "Menú de usuario",
     "delete": "Eliminar",
     "edit": "Editar",
     "back": "Atrás",
     "name": "Nombre",
     "create": "Crear",
     "loading": "Cargando...",
+    "retry": "Reintentar",
     "error": "Error",
     "success": "Éxito",
     "searchIcon": "Buscar icono...",
@@ -1317,6 +1345,8 @@
     "date": "Fecha",
     "splitTransaction": "Dividir esta transacción",
     "splitNoGroups": "Crea primero un grupo para dividir una transacción.",
+    "splitNoGroupsLinkPrefix": "Aún no tienes ningún grupo. Puedes ",
+    "splitNoGroupsLinkSuffix": "crear uno aquí",
     "splitNoMembers": "Añade primero miembros al grupo.",
     "group": "Grupo",
     "shareType": "Dividir por",
