@@ -72,12 +72,25 @@ async def create_default_groups(
     return groups
 
 
-async def get_groups(session: AsyncSession, workspace_id: uuid.UUID) -> list[CategoryGroup]:
+async def get_groups(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    include_hidden: bool = False,
+) -> list[CategoryGroup]:
+    filters = [CategoryGroup.workspace_id == workspace_id]
+    if not include_hidden:
+        filters.append(CategoryGroup.is_hidden.is_(False))
+
+    category_loader = selectinload(CategoryGroup.categories)
+    if not include_hidden:
+        category_loader = selectinload(CategoryGroup.categories.and_(Category.is_hidden.is_(False)))
+
     result = await session.execute(
         select(CategoryGroup)
-        .where(CategoryGroup.workspace_id == workspace_id)
-        .options(selectinload(CategoryGroup.categories))
-        .order_by(CategoryGroup.position)
+        .where(*filters)
+        .options(category_loader)
+        .order_by(CategoryGroup.is_hidden.asc(), CategoryGroup.position)
     )
     return list(result.scalars().all())
 

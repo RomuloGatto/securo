@@ -1,10 +1,11 @@
 import uuid
 from typing import Optional
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.category import Category
+from app.models.category_group import CategoryGroup
 from app.schemas.category import CategoryCreate, CategoryUpdate
 from app.services.category_group_service import CATEGORY_TO_GROUP, create_default_groups
 
@@ -91,11 +92,22 @@ async def create_default_categories(
     return categories
 
 
-async def get_categories(session: AsyncSession, workspace_id: uuid.UUID) -> list[Category]:
+async def get_categories(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    *,
+    include_hidden: bool = False,
+) -> list[Category]:
+    filters = [Category.workspace_id == workspace_id]
+    if not include_hidden:
+        filters.append(Category.is_hidden.is_(False))
+        filters.append(or_(Category.group_id.is_(None), CategoryGroup.is_hidden.is_(False)))
+
     result = await session.execute(
         select(Category)
-        .where(Category.workspace_id == workspace_id)
-        .order_by(Category.is_system.desc(), Category.name)
+        .outerjoin(CategoryGroup, Category.group_id == CategoryGroup.id)
+        .where(*filters)
+        .order_by(Category.is_hidden.asc(), Category.is_system.desc(), Category.name)
     )
     return list(result.scalars().all())
 

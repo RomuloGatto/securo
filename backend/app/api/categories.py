@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -17,10 +17,15 @@ router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 @router.get("", response_model=list[CategoryRead])
 async def list_categories(
+    include_hidden: bool = Query(False),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    return await category_service.get_categories(session, ctx.workspace.id)
+    return await category_service.get_categories(
+        session,
+        ctx.workspace.id,
+        include_hidden=include_hidden,
+    )
 
 
 @router.post("", response_model=CategoryRead, status_code=status.HTTP_201_CREATED)

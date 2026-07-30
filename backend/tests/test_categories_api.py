@@ -108,6 +108,35 @@ async def test_delete_system_category_fails(
 
 
 @pytest.mark.asyncio
+async def test_hide_system_category_filters_default_list(
+    client: AsyncClient, auth_headers, test_categories: list[Category]
+):
+    cat_id = str(test_categories[0].id)
+
+    update_response = await client.patch(
+        f"/api/categories/{cat_id}",
+        headers=auth_headers,
+        json={"is_hidden": True},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["is_hidden"] is True
+
+    response = await client.get("/api/categories", headers=auth_headers)
+    assert response.status_code == 200
+    assert cat_id not in {category["id"] for category in response.json()}
+
+    include_hidden_response = await client.get(
+        "/api/categories?include_hidden=true",
+        headers=auth_headers,
+    )
+    assert include_hidden_response.status_code == 200
+    hidden_category = next(
+        category for category in include_hidden_response.json() if category["id"] == cat_id
+    )
+    assert hidden_category["is_hidden"] is True
+
+
+@pytest.mark.asyncio
 async def test_categories_unauthenticated(client: AsyncClient, clean_db):
     response = await client.get("/api/categories")
     assert response.status_code == 401

@@ -923,7 +923,10 @@
     "treatAsTransferBadge": "Transfer",
     "ignoreTransfer": "Ignoruj ten transfer",
     "ignoreTransferDesc": "Ignorowane transakcje nie pojawią się w raportach przychodów ani wydatków.",
-    "ignoreTransferBadge": "Ignoruj"
+    "ignoreTransferBadge": "Ignoruj",
+    "hiddenBadge": "Ukryta",
+    "hideDefault": "Ukryj domyślną kategorię",
+    "showDefault": "Pokaż domyślną kategorię"
   },
   "groups": {
     "title": "Grupy kategorii",
@@ -938,7 +941,10 @@
     "updated": "Zaktualizowano grupę",
     "deleted": "Usunięto grupę",
     "noGroup": "Brak grupy",
-    "systemGroup": "Grupa systemowa"
+    "systemGroup": "Grupa systemowa",
+    "hiddenBadge": "Ukryta",
+    "hideDefault": "Ukryj domyślną grupę",
+    "showDefault": "Pokaż domyślną grupę"
   },
   "import": {
     "acceptedFormats": "Akceptowane formaty: OFX, CSV, QIF, CAMT",

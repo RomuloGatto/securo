@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_async_session
@@ -17,10 +17,15 @@ router = APIRouter(prefix="/api/category-groups", tags=["category-groups"])
 
 @router.get("", response_model=list[CategoryGroupRead])
 async def list_groups(
+    include_hidden: bool = Query(False),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    return await category_group_service.get_groups(session, ctx.workspace.id)
+    return await category_group_service.get_groups(
+        session,
+        ctx.workspace.id,
+        include_hidden=include_hidden,
+    )
 
 
 @router.post("", response_model=CategoryGroupRead, status_code=status.HTTP_201_CREATED)

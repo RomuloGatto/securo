@@ -869,7 +869,10 @@
     "treatAsTransferBadge": "Перевод",
     "ignoreTransfer": "Игнорировать этот перевод",
     "ignoreTransferDesc": "Игнорируемые транзакции не будут отображаться в отчётах о доходах и расходах.",
-    "ignoreTransferBadge": "Игнорировать"
+    "ignoreTransferBadge": "Игнорировать",
+    "hiddenBadge": "Скрыта",
+    "hideDefault": "Скрыть категорию по умолчанию",
+    "showDefault": "Показать категорию по умолчанию"
   },
   "groups": {
     "title": "Группы категорий",
@@ -884,7 +887,10 @@
     "updated": "Группа обновлена",
     "deleted": "Группа удалена",
     "noGroup": "Без группы",
-    "systemGroup": "Системная группа"
+    "systemGroup": "Системная группа",
+    "hiddenBadge": "Скрыта",
+    "hideDefault": "Скрыть группу по умолчанию",
+    "showDefault": "Показать группу по умолчанию"
   },
   "import": {
     "acceptedFormats": "Поддерживаемые форматы: OFX, CSV, QIF, CAMT",
