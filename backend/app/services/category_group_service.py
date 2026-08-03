@@ -10,6 +10,10 @@ from app.models.category_group import CategoryGroup
 from app.schemas.category_group import CategoryGroupCreate, CategoryGroupUpdate
 
 
+class CategoryGroupVisibilityError(ValueError):
+    """Raised when visibility is changed for a user-created category group."""
+
+
 # Language-keyed translations for default groups
 # Keys are internal identifiers, values are {lang: display_name}
 DEFAULT_GROUPS_I18N = {
@@ -123,7 +127,11 @@ async def update_group(
     if not group:
         return None
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    if changes.get("is_hidden") is True and not group.is_system:
+        raise CategoryGroupVisibilityError("Only system category groups can be hidden")
+
+    for key, value in changes.items():
         setattr(group, key, value)
 
     await session.commit()

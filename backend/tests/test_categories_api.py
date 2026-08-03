@@ -48,13 +48,19 @@ async def test_create_category(client: AsyncClient, auth_headers, test_categorie
     response = await client.post(
         "/api/categories",
         headers=auth_headers,
-        json={"name": "Educação", "icon": "📚", "color": "#9333EA"},
+        json={
+            "name": "Educação",
+            "icon": "📚",
+            "color": "#9333EA",
+            "is_hidden": True,
+        },
     )
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "Educação"
     assert data["icon"] == "📚"
     assert data["is_system"] is False
+    assert data["is_hidden"] is False
 
 
 @pytest.mark.asyncio
@@ -134,6 +140,41 @@ async def test_hide_system_category_filters_default_list(
         category for category in include_hidden_response.json() if category["id"] == cat_id
     )
     assert hidden_category["is_hidden"] is True
+
+
+@pytest.mark.asyncio
+async def test_cannot_hide_user_category(client: AsyncClient, auth_headers):
+    create_response = await client.post(
+        "/api/categories",
+        headers=auth_headers,
+        json={"name": "Custom"},
+    )
+    assert create_response.status_code == 201
+    category_id = create_response.json()["id"]
+
+    update_response = await client.patch(
+        f"/api/categories/{category_id}",
+        headers=auth_headers,
+        json={"is_hidden": True},
+    )
+
+    assert update_response.status_code == 400
+    assert update_response.json()["detail"] == "Only system categories can be hidden"
+
+    unhide_response = await client.patch(
+        f"/api/categories/{category_id}",
+        headers=auth_headers,
+        json={"is_hidden": False},
+    )
+    assert unhide_response.status_code == 200
+    assert unhide_response.json()["is_hidden"] is False
+
+    list_response = await client.get(
+        "/api/categories?include_hidden=true",
+        headers=auth_headers,
+    )
+    category = next(item for item in list_response.json() if item["id"] == category_id)
+    assert category["is_hidden"] is False
 
 
 @pytest.mark.asyncio

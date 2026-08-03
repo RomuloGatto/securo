@@ -885,6 +885,7 @@ function TransactionForm({
             onChange={setCategoryId}
             categories={categories}
             groups={categoryGroups}
+            currentCategory={seed?.category}
             allowNone={true}
           />
         </div>

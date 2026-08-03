@@ -147,6 +147,12 @@ export default function RulesPage() {
     queryFn: categoriesApi.list,
   })
 
+  const { data: allCategoriesList } = useQuery({
+    queryKey: ['categories', 'management'],
+    queryFn: categoriesApi.listIncludingHidden,
+    enabled: dialogOpen && Boolean(editing),
+  })
+
   const { data: categoryGroupsList } = useQuery({
     queryKey: ['categoryGroups'],
     queryFn: categoryGroupsApi.list,
@@ -481,6 +487,7 @@ export default function RulesPage() {
         rule={editing}
         categories={categories}
         categoryGroups={categoryGroupsList ?? []}
+        currentCategories={allCategoriesList ?? []}
         accounts={accountsList ?? []}
         payees={payees}
         onSave={(data) => {

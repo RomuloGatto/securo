@@ -871,6 +871,7 @@
     "ignoreTransferDesc": "Ignored transactions won't show on income or expense reports.",
     "ignoreTransferBadge": "Ignore",
     "hiddenBadge": "Hidden",
+    "hiddenScopeDescription": "Hidden defaults are removed from category pickers. Existing transactions, budgets, dashboards, and reports continue to use them.",
     "hideDefault": "Hide default category",
     "showDefault": "Show default category"
   },

@@ -10,6 +10,10 @@ from app.schemas.category import CategoryCreate, CategoryUpdate
 from app.services.category_group_service import CATEGORY_TO_GROUP, create_default_groups
 
 
+class CategoryVisibilityError(ValueError):
+    """Raised when visibility is changed for a user-created category."""
+
+
 # Language-keyed translations for default categories
 # Keys are internal identifiers used to map to groups and rules.
 # `treat_as_transfer` marks categories whose transactions are flows, not
@@ -146,7 +150,11 @@ async def update_category(
     if not category:
         return None
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    changes = data.model_dump(exclude_unset=True)
+    if changes.get("is_hidden") is True and not category.is_system:
+        raise CategoryVisibilityError("Only system categories can be hidden")
+
+    for key, value in changes.items():
         setattr(category, key, value)
 
     await session.commit()

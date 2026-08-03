@@ -14,7 +14,6 @@ class CategoryCreate(CategoryBase):
     group_id: Optional[uuid.UUID] = None
     treat_as_transfer: bool = False
     is_ignored: bool = False
-    is_hidden: bool = False
 
 
 class CategoryUpdate(BaseModel):

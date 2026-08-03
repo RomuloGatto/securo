@@ -194,6 +194,10 @@ export default function CategoriesPage() {
     <div>
       <PageHeader section={t('categories.title')} title={t('categories.title')} />
 
+      <p className="mb-4 text-sm text-muted-foreground">
+        {t('categories.hiddenScopeDescription')}
+      </p>
+
       <SectionCard>
         <SectionHeader
           title={t('categories.title')}

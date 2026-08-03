@@ -44,7 +44,12 @@ async def update_category(
     ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    category = await category_service.update_category(session, category_id, ctx.workspace.id, data)
+    try:
+        category = await category_service.update_category(
+            session, category_id, ctx.workspace.id, data
+        )
+    except category_service.CategoryVisibilityError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     if not category:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
     return category

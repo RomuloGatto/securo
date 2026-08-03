@@ -871,6 +871,7 @@
     "ignoreTransferDesc": "Ignorierte Transaktionen werden nicht in Einnahmen- oder Ausgabenberichten aufgeführt.",
     "ignoreTransferBadge": "Ignorieren",
     "hiddenBadge": "Ausgeblendet",
+    "hiddenScopeDescription": "Ausgeblendete Standardkategorien werden aus den Kategorieauswahlen entfernt. Bestehende Transaktionen, Budgets, Dashboards und Berichte verwenden sie weiterhin.",
     "hideDefault": "Standardkategorie ausblenden",
     "showDefault": "Standardkategorie anzeigen"
   },

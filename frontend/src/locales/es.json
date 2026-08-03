@@ -871,6 +871,7 @@
     "ignoreTransferDesc": "Las transacciones ignoradas no aparecerán en los informes de ingresos o gastos.",
     "ignoreTransferBadge": "Ignorar",
     "hiddenBadge": "Oculta",
+    "hiddenScopeDescription": "Las categorías predeterminadas ocultas se eliminan de los selectores. Las transacciones, los presupuestos, los paneles y los informes existentes siguen utilizándolas.",
     "hideDefault": "Ocultar categoría predeterminada",
     "showDefault": "Mostrar categoría predeterminada"
   },

@@ -925,6 +925,7 @@
     "ignoreTransferDesc": "Ignorowane transakcje nie pojawią się w raportach przychodów ani wydatków.",
     "ignoreTransferBadge": "Ignoruj",
     "hiddenBadge": "Ukryta",
+    "hiddenScopeDescription": "Ukryte kategorie domyślne są usuwane z list wyboru. Istniejące transakcje, budżety, pulpity i raporty nadal z nich korzystają.",
     "hideDefault": "Ukryj domyślną kategorię",
     "showDefault": "Pokaż domyślną kategorię"
   },
