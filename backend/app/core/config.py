@@ -118,10 +118,24 @@ class Settings(BaseSettings):
     # external dependency on the Brazilian government endpoint).
     tesouro_direto_enabled: bool = True
 
+    @property
+    def oidc_login_available(self) -> bool:
+        return bool(self.oidc_enabled and self.oidc_client_id and self.oidc_discovery_url)
+
     @model_validator(mode="after")
     def validate_auth_settings(self) -> "Settings":
-        if not self.local_auth_enabled and not self.oidc_enabled:
-            raise ValueError("LOCAL_AUTH_ENABLED=false requires OIDC_ENABLED=true")
+        if not self.local_auth_enabled and not self.oidc_login_available:
+            missing = []
+            if not self.oidc_enabled:
+                missing.append("OIDC_ENABLED=true")
+            if not self.oidc_client_id:
+                missing.append("OIDC_CLIENT_ID")
+            if not self.oidc_discovery_url:
+                missing.append("OIDC_DISCOVERY_URL")
+            raise ValueError(
+                "LOCAL_AUTH_ENABLED=false requires a complete OIDC configuration; "
+                f"missing: {', '.join(missing)}"
+            )
         return self
 
     model_config = SettingsConfigDict(env_file=".env", secrets_dir=CREDENTIALS_DIRECTORY)

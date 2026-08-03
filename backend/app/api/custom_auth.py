@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import get_jwt_strategy, get_user_manager
-from app.core.config import get_settings
+from app.core.auth_policy import require_local_auth_enabled
 from app.core.database import get_async_session
 from app.core.redis import get_redis
 from app.models.passkey import UserPasskey
@@ -23,9 +23,7 @@ async def login(
     user_manager=Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
 ):
-    settings = get_settings()
-    if not settings.local_auth_enabled:
-        raise HTTPException(status_code=403, detail="LOCAL_AUTH_DISABLED")
+    require_local_auth_enabled()
 
     user = await user_manager.authenticate(credentials)
     if user is None or not user.is_active:

@@ -84,6 +84,8 @@ def test_local_auth_enabled_defaults_true(secrets: Path):
 def test_local_auth_can_be_disabled_when_oidc_is_enabled(secrets: Path):
     settings = Settings(
         oidc_enabled=True,
+        oidc_client_id="securo",
+        oidc_discovery_url="https://id.example.com/.well-known/openid-configuration",
         local_auth_enabled=False,
         _secrets_dir=str(secrets),
     )
@@ -92,5 +94,26 @@ def test_local_auth_can_be_disabled_when_oidc_is_enabled(secrets: Path):
 
 
 def test_local_auth_disabled_requires_oidc(secrets: Path):
-    with pytest.raises(ValidationError, match="LOCAL_AUTH_ENABLED=false requires OIDC_ENABLED=true"):
+    with pytest.raises(ValidationError, match="LOCAL_AUTH_ENABLED=false requires a complete OIDC configuration"):
         Settings(local_auth_enabled=False, _secrets_dir=str(secrets))
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "overrides"),
+    [
+        ("OIDC_CLIENT_ID", {"oidc_discovery_url": "https://id.example.com/.well-known/openid-configuration"}),
+        ("OIDC_DISCOVERY_URL", {"oidc_client_id": "securo"}),
+    ],
+)
+def test_local_auth_disabled_requires_complete_oidc_configuration(
+    secrets: Path,
+    missing_field: str,
+    overrides: dict[str, str],
+):
+    with pytest.raises(ValidationError, match=missing_field):
+        Settings(
+            oidc_enabled=True,
+            local_auth_enabled=False,
+            _secrets_dir=str(secrets),
+            **overrides,
+        )

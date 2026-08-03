@@ -129,7 +129,7 @@ export function AppLayout() {
     queryFn: authApi.oidcConfig,
     staleTime: 60_000,
   })
-  const localAuthEnabled = oidcConfig?.local_auth_enabled ?? true
+  const localAuthEnabled = oidcConfig?.local_auth_enabled === true
 
   // ⌘J / Ctrl+J toggles the global slide-over chat from anywhere.
   // Distinct from ⌘K (command palette) so users can have both open.

@@ -25,6 +25,7 @@ from webauthn.helpers.structs import (
 )
 
 from app.core.auth import current_active_user, get_jwt_strategy
+from app.core.auth_policy import require_local_auth_enabled
 from app.core.config import get_settings
 from app.core.database import get_async_session
 from app.core.rate_limit import login_rate_limit
@@ -79,11 +80,6 @@ def _optional_bool(value: Any) -> bool | None:
 
 def _challenge_key(prefix: str, challenge_id: str) -> str:
     return f"{prefix}:{challenge_id}"
-
-
-def _ensure_local_auth_enabled() -> None:
-    if not get_settings().local_auth_enabled:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="LOCAL_AUTH_DISABLED")
 
 
 async def _get_second_factor_user_id(temp_token: str) -> str:
@@ -201,7 +197,7 @@ async def passkey_registration_options(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     settings = get_settings()
     context = resolve_webauthn_context(request)
     existing = await session.execute(select(UserPasskey).where(UserPasskey.user_id == user.id))
@@ -243,7 +239,7 @@ async def verify_passkey_registration(
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     challenge = await _pop_challenge(REGISTER_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != str(user.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
@@ -308,7 +304,7 @@ async def passkey_authentication_options(
     body: PasskeyAuthenticateOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     context = resolve_webauthn_context(request)
     email = body.email.strip().lower() if body.email else None
     expected_user_id: str | None = None
@@ -341,7 +337,7 @@ async def verify_passkey_authentication(
     body: PasskeyAuthenticateVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     challenge = await _pop_challenge(AUTHENTICATE_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
@@ -378,7 +374,7 @@ async def passkey_second_factor_options(
     body: PasskeySecondFactorOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     context = resolve_webauthn_context(request)
     user_id = await _get_second_factor_user_id(body.temp_token)
     result = await session.execute(
@@ -413,7 +409,7 @@ async def verify_passkey_second_factor(
     body: PasskeySecondFactorVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    _ensure_local_auth_enabled()
+    require_local_auth_enabled()
     user_id = await _get_second_factor_user_id(body.temp_token)
     challenge = await _pop_challenge(SECOND_FACTOR_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != user_id:

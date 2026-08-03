@@ -1,20 +1,26 @@
 import pytest
 from httpx import AsyncClient
 
+from app.core.auth import get_jwt_strategy
 from app.core.config import get_settings
 
 
 @pytest.fixture
 def oidc_only_settings():
     settings = get_settings()
-    old = settings.model_dump()
+    old_oidc_enabled = settings.oidc_enabled
+    old_oidc_discovery_url = settings.oidc_discovery_url
+    old_oidc_client_id = settings.oidc_client_id
+    old_local_auth_enabled = settings.local_auth_enabled
     settings.oidc_enabled = True
     settings.oidc_discovery_url = "https://id.example.com/.well-known/openid-configuration"
     settings.oidc_client_id = "securo"
     settings.local_auth_enabled = False
     yield settings
-    for key, value in old.items():
-        setattr(settings, key, value)
+    settings.oidc_enabled = old_oidc_enabled
+    settings.oidc_discovery_url = old_oidc_discovery_url
+    settings.oidc_client_id = old_oidc_client_id
+    settings.local_auth_enabled = old_local_auth_enabled
 
 
 @pytest.mark.asyncio
@@ -87,3 +93,69 @@ async def test_login_forbidden_when_local_auth_disabled(client: AsyncClient, tes
 
     assert response.status_code == 403
     assert response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_register_forbidden_when_local_auth_disabled(client: AsyncClient, clean_db, oidc_only_settings):
+    response = await client.post(
+        "/api/auth/register",
+        json={"email": "new@example.com", "password": "newpass123"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/api/auth/forgot-password", {"email": "test@example.com"}),
+        ("/api/auth/reset-password", {"token": "invalid", "password": "newpass123"}),
+    ],
+)
+async def test_password_reset_forbidden_when_local_auth_disabled(
+    client: AsyncClient,
+    clean_db,
+    oidc_only_settings,
+    path: str,
+    payload: dict[str, str],
+):
+    response = await client.post(path, json=payload)
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_self_password_update_forbidden_when_local_auth_disabled(
+    client: AsyncClient,
+    test_user,
+    oidc_only_settings,
+):
+    token = await get_jwt_strategy().write_token(test_user)
+    response = await client.patch(
+        "/api/users/me",
+        json={"password": "replacement123"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "LOCAL_AUTH_DISABLED"
+
+
+@pytest.mark.asyncio
+async def test_profile_update_allowed_when_local_auth_disabled(
+    client: AsyncClient,
+    test_user,
+    oidc_only_settings,
+):
+    token = await get_jwt_strategy().write_token(test_user)
+    response = await client.patch(
+        "/api/users/me",
+        json={"preferences": {"language": "en"}},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["preferences"]["language"] == "en"

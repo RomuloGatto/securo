@@ -161,6 +161,7 @@
     "loginDescription": "Sign in to access your account",
     "invalidCredentials": "Invalid email or password",
     "serverError": "Couldn't connect to the server. Check your connection or that the backend is running, then try again.",
+    "noAuthMethodConfigured": "No authentication method is configured. Contact the administrator and check the OIDC settings.",
     "noAccount": "Don't have an account?",
     "hasAccount": "Already have an account?",
     "changePassword": "Change password",
