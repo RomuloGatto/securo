@@ -16,6 +16,7 @@ import {
 import type { Category, CategoryGroup } from '@/types'
 import { Pencil, Trash2, Plus, ChevronDown, ChevronRight, ChevronsUpDown, Eye, EyeOff } from 'lucide-react'
 import { PageHeader } from '@/components/page-header'
+import { invalidateCategoryQueries } from '@/lib/invalidate-queries'
 import { CategoryIcon } from '@/components/category-icon'
 import { IconPicker } from '@/components/icon-picker'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -66,8 +67,7 @@ export default function CategoriesPage() {
   })
 
   const invalidateAll = () => {
-    queryClient.invalidateQueries({ queryKey: ['categories'] })
-    queryClient.invalidateQueries({ queryKey: ['category-groups'] })
+    invalidateCategoryQueries(queryClient)
   }
 
   const createCatMutation = useMutation({

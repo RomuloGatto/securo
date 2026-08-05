@@ -26,6 +26,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
+import { findBudgetCategoryDisplay } from '@/lib/category-reference-utils'
 
 function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
   return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
@@ -74,6 +75,11 @@ export default function BudgetsPage() {
     queryFn: () => budgetsApi.list(monthParam),
   })
 
+  const { data: budgetComparison } = useQuery({
+    queryKey: ['budgets', 'comparison', selectedMonth],
+    queryFn: () => budgetsApi.comparison(monthParam),
+  })
+
   const { data: categoriesList } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
@@ -116,12 +122,12 @@ export default function BudgetsPage() {
   })
 
   const getCategoryDisplay = (categoryId: string) => {
-    const cat = categoriesList?.find((c) => c.id === categoryId)
-    if (!cat) return <span>{categoryId}</span>
+    const category = findBudgetCategoryDisplay(budgetComparison ?? [], categoryId)
+    if (!category) return <span>{categoryId}</span>
     return (
       <span className="flex items-center gap-2">
-        <CategoryIcon icon={cat.icon} color={cat.color} size="sm" />
-        <span>{cat.name}</span>
+        <CategoryIcon icon={category.category_icon} color={category.category_color} size="sm" />
+        <span>{category.category_name}</span>
       </span>
     )
   }
