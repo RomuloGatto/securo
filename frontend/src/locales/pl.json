@@ -161,6 +161,7 @@
     "loginDescription": "Zaloguj się, aby uzyskać dostęp do konta",
     "invalidCredentials": "Nieprawidłowy e-mail lub hasło",
     "serverError": "Nie można połączyć się z serwerem. Sprawdź połączenie lub czy backend działa, a następnie spróbuj ponownie.",
+    "authConfigUnavailable": "Nie udało się wczytać opcji uwierzytelniania. Logowanie lokalne pozostaje dostępne; serwer zastosuje skonfigurowane zasady.",
     "noAuthMethodConfigured": "Nie skonfigurowano żadnej metody uwierzytelniania. Skontaktuj się z administratorem i sprawdź ustawienia OIDC.",
     "noAccount": "Nie masz konta?",
     "hasAccount": "Masz już konto?",

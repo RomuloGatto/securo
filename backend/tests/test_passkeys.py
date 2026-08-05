@@ -7,20 +7,7 @@ from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
 from app.models.passkey import UserPasskey
-
-
-@pytest.fixture
-def local_auth_disabled():
-    settings = get_settings()
-    old_local_auth_enabled = settings.local_auth_enabled
-    old_oidc_enabled = settings.oidc_enabled
-    settings.oidc_enabled = True
-    settings.local_auth_enabled = False
-    yield settings
-    settings.local_auth_enabled = old_local_auth_enabled
-    settings.oidc_enabled = old_oidc_enabled
 
 
 class _RedisStore:
@@ -523,7 +510,7 @@ async def test_register_verify_deletes_challenge_after_failure(
 async def test_passkey_registration_forbidden_when_local_auth_disabled(
     client: AsyncClient,
     auth_headers: dict,
-    local_auth_disabled,
+    oidc_only_settings,
 ):
     options_response = await client.post(
         "/api/auth/passkeys/register/options",
@@ -547,7 +534,7 @@ async def test_delete_passkey_allowed_when_local_auth_disabled(
     auth_headers: dict,
     session: AsyncSession,
     test_user,
-    local_auth_disabled,
+    oidc_only_settings,
 ):
     passkey = UserPasskey(
         user_id=test_user.id,
@@ -567,7 +554,7 @@ async def test_delete_passkey_allowed_when_local_auth_disabled(
     assert result.scalar_one_or_none() is None
 
 
-async def test_passkey_login_forbidden_when_local_auth_disabled(client: AsyncClient, local_auth_disabled):
+async def test_passkey_login_forbidden_when_local_auth_disabled(client: AsyncClient, oidc_only_settings):
     options_response = await client.post(
         "/api/auth/passkeys/authenticate/options",
         json={"email": "test@example.com"},
@@ -583,7 +570,7 @@ async def test_passkey_login_forbidden_when_local_auth_disabled(client: AsyncCli
     assert verify_response.json()["detail"] == "LOCAL_AUTH_DISABLED"
 
 
-async def test_passkey_second_factor_forbidden_when_local_auth_disabled(client: AsyncClient, local_auth_disabled):
+async def test_passkey_second_factor_forbidden_when_local_auth_disabled(client: AsyncClient, oidc_only_settings):
     options_response = await client.post(
         "/api/auth/passkeys/2fa/options",
         json={"temp_token": "missing"},

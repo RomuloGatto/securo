@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import current_active_user, get_user_manager, UserManager
+from app.core.auth_policy import require_local_auth_enabled
 from app.core.database import get_async_session
 from app.core.workspace_context import WorkspaceContext, current_workspace
 from app.models.user import User
@@ -208,6 +209,7 @@ async def invite_member(
                 status_code=400,
                 detail="User not found. Provide a password to create them.",
             )
+        require_local_auth_enabled()
         try:
             create_payload = fu_schemas.BaseUserCreate(
                 email=body.email,

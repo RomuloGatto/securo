@@ -99,21 +99,27 @@ def test_local_auth_disabled_requires_oidc(secrets: Path):
 
 
 @pytest.mark.parametrize(
-    ("missing_field", "overrides"),
+    ("missing_field", "oidc_client_id", "oidc_discovery_url"),
     [
-        ("OIDC_CLIENT_ID", {"oidc_discovery_url": "https://id.example.com/.well-known/openid-configuration"}),
-        ("OIDC_DISCOVERY_URL", {"oidc_client_id": "securo"}),
+        (
+            "OIDC_CLIENT_ID",
+            "",
+            "https://id.example.com/.well-known/openid-configuration",
+        ),
+        ("OIDC_DISCOVERY_URL", "securo", ""),
     ],
 )
 def test_local_auth_disabled_requires_complete_oidc_configuration(
     secrets: Path,
     missing_field: str,
-    overrides: dict[str, str],
+    oidc_client_id: str,
+    oidc_discovery_url: str,
 ):
     with pytest.raises(ValidationError, match=missing_field):
         Settings(
             oidc_enabled=True,
+            oidc_client_id=oidc_client_id,
+            oidc_discovery_url=oidc_discovery_url,
             local_auth_enabled=False,
             _secrets_dir=str(secrets),
-            **overrides,
         )

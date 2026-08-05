@@ -161,6 +161,7 @@
     "loginDescription": "Connectez-vous pour accéder à votre compte",
     "invalidCredentials": "E-mail ou mot de passe invalide",
     "serverError": "Impossible de se connecter au serveur. Vérifiez votre connexion ou que le backend est en cours d'exécution, puis réessayez.",
+    "authConfigUnavailable": "Les options d’authentification n’ont pas pu être chargées. La connexion locale reste disponible ; le serveur appliquera la politique configurée.",
     "noAuthMethodConfigured": "Aucune méthode d’authentification n’est configurée. Contactez l’administrateur et vérifiez les paramètres OIDC.",
     "noAccount": "Vous n'avez pas de compte ?",
     "hasAccount": "Vous avez déjà un compte ?",

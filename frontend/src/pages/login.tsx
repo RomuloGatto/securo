@@ -10,6 +10,7 @@ import { Card, CardContent, CardFooter } from '@/components/ui/card'
 import { ShellLogo } from '@/components/shell-logo'
 import type { AxiosError } from 'axios'
 import { isServerUnreachable } from '@/lib/auth-errors'
+import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
 import { useTheme } from 'next-themes'
 import { setThemeBasedOnSystem } from '@/lib/theme-utils'
 import { isPasskeySupported, passkeyFailure, startPasskeyAuthentication } from '@/lib/webauthn'
@@ -60,11 +61,6 @@ export default function LoginPage() {
       navigate('/', { replace: true })
       return
     }
-    setup.status().then(({ has_users }) => {
-      if (!has_users) {
-        navigate('/setup', { replace: true })
-      }
-    }).catch(() => {})
     adminApi.registrationStatus().then(({ enabled }) => {
       setRegistrationEnabled(enabled)
     }).catch(() => {})
@@ -78,6 +74,25 @@ export default function LoginPage() {
       setThemeBasedOnSystem(light, dark, resolvedTheme)
     }).catch(() => {})
   }, [navigate, token, resolvedTheme])
+
+  useEffect(() => {
+    if (token || (oidcConfig === null && !oidcConfigFailed)) return
+
+    let active = true
+    setup.status().then(({ has_users }) => {
+      if (
+        active &&
+        !has_users &&
+        resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
+      ) {
+        navigate('/setup', { replace: true })
+      }
+    }).catch(() => {})
+
+    return () => {
+      active = false
+    }
+  }, [navigate, oidcConfig, oidcConfigFailed, token])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -193,7 +208,7 @@ export default function LoginPage() {
     }
   }
 
-  const localAuthEnabled = oidcConfig?.local_auth_enabled === true
+  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
   const oidcEnabled = oidcConfig?.enabled === true
   const authConfigLoading = oidcConfig === null && !oidcConfigFailed
   const noAuthMethodConfigured = oidcConfig !== null && !localAuthEnabled && !oidcEnabled
@@ -317,8 +332,8 @@ export default function LoginPage() {
           )}
           {oidcConfigFailed && (
             <CardContent className="px-8 py-4">
-              <div role="alert" className="p-3 text-sm text-destructive bg-destructive/10 rounded-lg">
-                {t('auth.serverError')}
+              <div role="alert" className="p-3 text-sm text-muted-foreground bg-muted rounded-lg">
+                {t('auth.authConfigUnavailable')}
               </div>
             </CardContent>
           )}
@@ -359,7 +374,7 @@ export default function LoginPage() {
               </div>
             </CardContent>
           )}
-          {!authConfigLoading && !oidcConfigFailed && !noAuthMethodConfigured && (
+          {!authConfigLoading && !noAuthMethodConfigured && (
             <CardFooter className={`flex flex-col gap-4 px-8 pb-8 ${localAuthEnabled ? 'pt-2' : 'pt-6'}`}>
               {localAuthEnabled && (
                 <Button type="submit" className="w-full" disabled={isLoading || isPasskeyLoading}>

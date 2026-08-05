@@ -161,6 +161,7 @@
     "loginDescription": "Melde dich an, um auf dein Konto zuzugreifen",
     "invalidCredentials": "Ungültige E-Mail-Adresse oder Passwort",
     "serverError": "Verbindung zum Server fehlgeschlagen. Überprüfe deine Verbindung oder ob das Backend läuft und versuche es erneut.",
+    "authConfigUnavailable": "Die Authentifizierungsoptionen konnten nicht geladen werden. Die lokale Anmeldung bleibt verfügbar; der Server erzwingt die konfigurierte Richtlinie.",
     "noAuthMethodConfigured": "Es ist keine Authentifizierungsmethode konfiguriert. Wende dich an den Administrator und prüfe die OIDC-Einstellungen.",
     "noAccount": "Noch kein Konto?",
     "hasAccount": "Bereits ein Konto?",

@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { auth as authApi, currencies as currenciesApi, workspaces as workspacesApi } from '@/lib/api'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
+import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -112,6 +113,13 @@ export default function WorkspaceSettingsPage() {
     staleTime: Infinity,
   })
 
+  const { data: oidcConfig, isError: oidcConfigFailed } = useQuery({
+    queryKey: ['auth', 'oidc-config'],
+    queryFn: authApi.oidcConfig,
+    staleTime: 60_000,
+  })
+  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
+
   const statsQuery = useQuery({
     queryKey: ['workspace-stats', current?.id],
     queryFn: () => (current ? workspacesApi.stats(current.id) : Promise.resolve({ members: 0, accounts: 0, transactions: 0 })),
@@ -177,7 +185,7 @@ export default function WorkspaceSettingsPage() {
       return workspacesApi.invite(current.id, {
         email: inviteEmail.trim(),
         role: inviteRole,
-        password: invitePassword || undefined,
+        password: localAuthEnabled ? (invitePassword || undefined) : undefined,
       })
     },
     onSuccess: () => {
@@ -584,22 +592,24 @@ export default function WorkspaceSettingsPage() {
                 ))}
               </select>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="invite-password" className="text-[13px]">
-                {t('workspace.passwordForNewUsers')}
-              </Label>
-              <Input
-                id="invite-password"
-                type="password"
-                value={invitePassword}
-                onChange={(e) => setInvitePassword(e.target.value)}
-                className="h-10 rounded-lg"
-                placeholder=""
-              />
-              <p className="text-[11px] text-muted-foreground leading-relaxed">
-                {t('workspace.passwordHint')}
-              </p>
-            </div>
+            {localAuthEnabled && (
+              <div className="space-y-1.5">
+                <Label htmlFor="invite-password" className="text-[13px]">
+                  {t('workspace.passwordForNewUsers')}
+                </Label>
+                <Input
+                  id="invite-password"
+                  type="password"
+                  value={invitePassword}
+                  onChange={(e) => setInvitePassword(e.target.value)}
+                  className="h-10 rounded-lg"
+                  placeholder=""
+                />
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {t('workspace.passwordHint')}
+                </p>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button

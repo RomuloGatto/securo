@@ -70,6 +70,7 @@ import { GlobalChatPanel } from '@/components/global-chat-panel'
 import { useFeatureFlags } from '@/hooks/use-feature-flags'
 import { Bot, Search, Sparkles } from 'lucide-react'
 import { setThemeBasedOnSystem } from '@/lib/theme-utils'
+import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
 
 type NavItem =
   | { type: 'link'; key: string; path: string; icon: React.ElementType }
@@ -124,12 +125,12 @@ export function AppLayout() {
   const [updateDialogOpen, setUpdateDialogOpen] = useState(false)
   useCommandPaletteHotkey(setPaletteOpen)
   const { agentsEnabled } = useFeatureFlags()
-  const { data: oidcConfig } = useQuery({
+  const { data: oidcConfig, isError: oidcConfigFailed } = useQuery({
     queryKey: ['auth', 'oidc-config'],
     queryFn: authApi.oidcConfig,
     staleTime: 60_000,
   })
-  const localAuthEnabled = oidcConfig?.local_auth_enabled === true
+  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
 
   // ⌘J / Ctrl+J toggles the global slide-over chat from anywhere.
   // Distinct from ⌘K (command palette) so users can have both open.

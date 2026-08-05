@@ -2,25 +2,6 @@ import pytest
 from httpx import AsyncClient
 
 from app.core.auth import get_jwt_strategy
-from app.core.config import get_settings
-
-
-@pytest.fixture
-def oidc_only_settings():
-    settings = get_settings()
-    old_oidc_enabled = settings.oidc_enabled
-    old_oidc_discovery_url = settings.oidc_discovery_url
-    old_oidc_client_id = settings.oidc_client_id
-    old_local_auth_enabled = settings.local_auth_enabled
-    settings.oidc_enabled = True
-    settings.oidc_discovery_url = "https://id.example.com/.well-known/openid-configuration"
-    settings.oidc_client_id = "securo"
-    settings.local_auth_enabled = False
-    yield settings
-    settings.oidc_enabled = old_oidc_enabled
-    settings.oidc_discovery_url = old_oidc_discovery_url
-    settings.oidc_client_id = old_oidc_client_id
-    settings.local_auth_enabled = old_local_auth_enabled
 
 
 @pytest.mark.asyncio
