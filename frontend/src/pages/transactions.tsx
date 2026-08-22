@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -34,14 +35,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Skeleton } from '@/components/ui/skeleton'
-import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, Check, HelpCircle, Info, Paperclip, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
-import type { Transaction, Rule } from '@/types'
+import { AlertTriangle, ArrowLeftRight, ArrowUp, ArrowDown, Check, Clock, HelpCircle, Info, Paperclip, Trash2, Users, X, EyeClosed, SlidersHorizontal } from 'lucide-react'
+import type { Transaction, Rule, InstallmentSeriesInput, TransactionApplyScope, TransactionEditPayload } from '@/types'
 import { RuleDialog, type RuleDialogInitialData } from '@/components/rule-dialog'
 import { PageHeader } from '@/components/page-header'
 import { calculateRangeSelection } from '@/lib/selection-utils'
+import { isManualInstallmentSeriesRow } from '@/lib/installment-series'
 import { CategoryIcon } from '@/components/category-icon'
 import { CategorySelect } from '@/components/category-select'
-import { TransactionDialog, extractApiError, type SaveAction } from '@/components/transaction-dialog'
+import { TransactionDialog, type SaveAction, type TransactionSavePayload } from '@/components/transaction-dialog'
+import { extractApiError } from '@/lib/api-errors'
 import { TransactionsColumnPicker } from '@/components/transactions-column-picker'
 import { TransactionsPageActions } from '@/components/transactions-page-actions'
 import { MobileBulkSelectionActions } from '@/components/mobile-bulk-selection-actions'
@@ -50,22 +53,24 @@ import { TransferDialog } from '@/components/transfer-dialog'
 import { LinkTransferDialog } from '@/components/link-transfer-dialog'
 import { BulkAddToGroupDialog, type BulkAddToGroupSubmission } from '@/components/bulk-add-to-group-dialog'
 import { TransactionsFilterBar } from '@/components/transactions-filter-bar'
+import { TransactionCalendarView } from '@/components/transaction-calendar-view'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
+import { useIsMobile } from '@/hooks/use-mobile'
+import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
+import { formatCurrency } from '@/lib/format'
+import { shouldShowPendingBadge } from '@/lib/transaction-status'
 
-type TransactionUpdatePayload = Partial<Transaction> & {
+type TransactionUpdatePayload = TransactionEditPayload & {
   apply_to_transfer_pair?: boolean
+  apply_to?: TransactionApplyScope
 }
 
 type PendingTransferCategoryUpdate = {
   id: string
   data: TransactionUpdatePayload
-}
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
 }
 
 function parseHashtags(notes: string | null): string[] {
@@ -74,6 +79,8 @@ function parseHashtags(notes: string | null): string[] {
   return matches ?? []
 }
 
+const HIDE_IGNORED_STORAGE_KEY = 'securo.transactions.hideIgnored'
+
 export default function TransactionsPage() {
   const { t, i18n } = useTranslation()
   const [searchParams] = useSearchParams()
@@ -81,6 +88,7 @@ export default function TransactionsPage() {
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
   const { mask } = usePrivacyMode()
+  const isMobile = useIsMobile()
   const { user } = useAuth()
   const { activeAccountIds } = useCollectionFilter()
   const { canWrite } = useWorkspace()
@@ -95,7 +103,10 @@ export default function TransactionsPage() {
       return 20
     }
   })
-  const [filterAccountIds, setFilterAccountIds] = useState<string[]>([])
+  const [filterAccountIds, setFilterAccountIds] = useState<string[]>(() => {
+    const initial = searchParams.get('account_id')
+    return initial ? initial.split(',') : []
+  })
   const [filterCategoryIds, setFilterCategoryIds] = useState<string[]>(() => {
     const initial = searchParams.get('category_id')
     return initial ? [initial] : []
@@ -129,11 +140,31 @@ export default function TransactionsPage() {
   const [editingTx, setEditingTx] = useState<Transaction | null>(null)
   const [pendingTransferCategoryUpdate, setPendingTransferCategoryUpdate] =
     useState<PendingTransferCategoryUpdate | null>(null)
+  // Manual installment-series scoped delete. Scoped edits are handled by the
+  // shared TransactionDialog so account detail and dashboard behave the same.
+  const [pendingSeriesDeleteId, setPendingSeriesDeleteId] = useState<string | null>(null)
   const [formResetKey, setFormResetKey] = useState(0)
-  const [duplicateDraft, setDuplicateDraft] = useState<Partial<Transaction> | null>(null)
+  const [duplicateDraft, setDuplicateDraft] = useState<TransactionEditPayload | null>(null)
+  const [viewMode, setViewMode] = useState<'list' | 'calendar'>(() => (
+    searchParams.get('view') === 'calendar' ? 'calendar' : 'list'
+  ))
+  const [calendarSelectedDate, setCalendarSelectedDate] = useState<string>(() => searchParams.get('day') ?? '')
   const [filterPayee, setFilterPayee] = useState<string>(searchParams.get('payee_id') ?? '')
   const [filterGroupId, setFilterGroupId] = useState<string>(searchParams.get('group_id') ?? '')
   const [filterType, setFilterType] = useState<string>(searchParams.get('type') ?? '')
+  const [filterStatus, setFilterStatus] = useState<string>(searchParams.get('status') ?? '')
+  // Hiding ignored rows is a reading preference, not a query someone re-picks
+  // every visit, so it outlives the page the way page size and columns do. The
+  // URL still wins when present, so a shared link shows what its sender saw.
+  const [hideIgnored, setHideIgnored] = useState<boolean>(() => {
+    const fromUrl = searchParams.get('hide_ignored')
+    if (fromUrl !== null) return fromUrl === 'true'
+    try {
+      return localStorage.getItem(HIDE_IGNORED_STORAGE_KEY) === 'true'
+    } catch {
+      return false
+    }
+  })
   const [filterMinAmount, setFilterMinAmount] = useState<string>(searchParams.get('min_amount') ?? '')
   const [filterMaxAmount, setFilterMaxAmount] = useState<string>(searchParams.get('max_amount') ?? '')
   const [tagFilters, setTagFilters] = useState<string[]>([])
@@ -202,6 +233,8 @@ export default function TransactionsPage() {
     prevSearchRef.current = search
 
     const nextQ = searchParams.get('q') ?? ''
+    setViewMode(searchParams.get('view') === 'calendar' ? 'calendar' : 'list')
+    setCalendarSelectedDate(searchParams.get('day') ?? '')
     setSearchInput(nextQ)
     setSearchQuery(nextQ)
     const tags = searchParams.get('tags');
@@ -209,6 +242,9 @@ export default function TransactionsPage() {
     setFilterPayee(searchParams.get('payee_id') ?? '')
     setFilterGroupId(searchParams.get('group_id') ?? '')
     setFilterType(searchParams.get('type') ?? '')
+    setFilterStatus(searchParams.get('status') ?? '')
+    const urlHideIgnored = searchParams.get('hide_ignored')
+    if (urlHideIgnored !== null) setHideIgnored(urlHideIgnored === 'true')
     const categories = searchParams.get('category_id');
     setFilterCategoryIds(categories ? categories.split(',') : []);
     setFilterUncategorized(searchParams.get('uncategorized') === '1');
@@ -237,10 +273,13 @@ export default function TransactionsPage() {
     const params = new URLSearchParams(
       [
         ['q', searchQuery],
+        ['view', viewMode === 'calendar' ? 'calendar' : ''],
+        ['day', viewMode === 'calendar' ? calendarSelectedDate : ''],
         ['tags', tagFilters.join(',')],
         ['payee_id', filterPayee],
         ['group_id', filterGroupId],
         ['type', filterType],
+        ['status', filterStatus],
         ['category_id', filterCategoryIds.join(',')],
         ['uncategorized', filterUncategorized ? '1' : ''],
         ['account_id', filterAccountIds.join(',')],
@@ -248,6 +287,7 @@ export default function TransactionsPage() {
         ['to', filterTo],
         ['min_amount', filterMinAmount],
         ['max_amount', filterMaxAmount],
+        ['hide_ignored', hideIgnored ? 'true' : ''],
       ].filter(([, v]) => v.length),
     );
 
@@ -258,10 +298,13 @@ export default function TransactionsPage() {
     );
   }, [
     searchQuery,
+    viewMode,
+    calendarSelectedDate,
     tagFilters,
     filterPayee,
     filterGroupId,
     filterType,
+    filterStatus,
     filterCategoryIds,
     filterUncategorized,
     filterAccountIds,
@@ -269,6 +312,7 @@ export default function TransactionsPage() {
     filterTo,
     filterMinAmount,
     filterMaxAmount,
+    hideIgnored,
   ]);
 
   useEffect(() => {
@@ -285,7 +329,16 @@ export default function TransactionsPage() {
     setSelectedIds(new Set())
     setLastSelectedId(null)
     setBulkCategory('')
-  }, [page, filterAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterType, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery])
+  }, [page, filterAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterType, filterStatus, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery])
+
+  useEffect(() => {
+    if (viewMode === 'calendar') {
+      setFilterAccountIds((prev) => prev.length > 1 ? [] : prev)
+      setSelectedIds(new Set())
+      setLastSelectedId(null)
+      setBulkCategory('')
+    }
+  }, [viewMode, filterAccountIds.length])
 
   // Reset bulk category when selection changes so the same category can be re-applied
   useEffect(() => {
@@ -326,7 +379,7 @@ export default function TransactionsPage() {
     && activeAccountIds !== null && activeAccountIds.length === 0
 
   const { data, isLoading } = useQuery({
-    queryKey: ['transactions', page, limit, effectiveAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterGroupId, filterType, filterFrom, filterTo, filterMinAmount, filterMaxAmount, searchQuery, tagFilters, grid.sortBy, grid.sortDir],
+    queryKey: ['transactions', page, limit, effectiveAccountIds, filterCategoryIds, filterUncategorized, filterPayee, filterGroupId, filterType, filterStatus, filterFrom, filterTo, filterMinAmount, filterMaxAmount, hideIgnored, searchQuery, tagFilters, isMobile ? 'date' : grid.sortBy, isMobile ? 'desc' : grid.sortDir],
     enabled: !noAccounts,
     queryFn: () =>
       transactions.list({
@@ -337,6 +390,7 @@ export default function TransactionsPage() {
         payee_id: filterPayee || undefined,
         group_id: filterGroupId || undefined,
         type: filterType || undefined,
+        status: filterStatus || undefined,
         uncategorized: filterUncategorized ? true : undefined,
         from: filterFrom || undefined,
         to: filterTo || undefined,
@@ -344,8 +398,22 @@ export default function TransactionsPage() {
         max_amount: filterMaxAmount ? Number(filterMaxAmount) : undefined,
         q: searchQuery || undefined,
         tags: tagFilters.length > 0 ? tagFilters : undefined,
-        ...grid.apiSort,
+        exclude_ignored: hideIgnored ? true : undefined,
+        // Mobile has no column headers to change sort; force date-desc so
+        // the date grouping always works correctly.
+        ...(isMobile ? { sort_by: 'date', sort_dir: 'desc' as const } : grid.apiSort),
       }),
+  })
+
+  const calendarMonth = steppedMonth
+  const calendarAccountIds = filterAccountIds.length === 1 ? filterAccountIds : []
+  const { data: calendarData, isLoading: calendarLoading } = useQuery({
+    queryKey: ['transactions', 'calendar', calendarMonth, calendarAccountIds],
+    enabled: viewMode === 'calendar',
+    queryFn: () => transactions.calendar({
+      month: `${calendarMonth}-01`,
+      account_ids: calendarAccountIds.length === 1 ? calendarAccountIds : undefined,
+    }),
   })
 
   // Publish the active filters + result count to the global chat panel.
@@ -359,6 +427,7 @@ export default function TransactionsPage() {
     payee_id: filterPayee || undefined,
     group_id: filterGroupId || undefined,
     type: filterType || undefined,
+    status: filterStatus || undefined,
     uncategorized: filterUncategorized || undefined,
     from: filterFrom || undefined,
     to: filterTo || undefined,
@@ -407,6 +476,10 @@ export default function TransactionsPage() {
     queryKey: ['recurring'],
     queryFn: recurring.list,
   })
+  const recurringById = useMemo(
+    () => new Map((recurringList ?? []).map(item => [item.id, item])),
+    [recurringList],
+  )
 
   const { data: accountingModeData } = useQuery({
     queryKey: ['admin', 'accounting-mode'],
@@ -418,8 +491,16 @@ export default function TransactionsPage() {
   const invalidateAfterTxMutation = () => invalidateFinancialQueries(queryClient)
 
   const createMutation = useMutation({
-    mutationFn: async (payload: { tx: Partial<Transaction>; recurringData?: { frequency: string; end_date?: string }; pendingFiles?: File[]; action?: SaveAction }) => {
-      const created = await transactions.create(payload.tx)
+    mutationFn: async (payload: { tx: TransactionEditPayload; recurringData?: { frequency: string; end_date?: string }; installmentData?: InstallmentSeriesInput; pendingFiles?: File[]; action?: SaveAction }) => {
+      let created: Transaction
+      if (payload.installmentData) {
+        // Manual installment series: the backend repeats the base row N
+        // times with the shared installment fingerprint.
+        const series = await transactions.createInstallments(payload.installmentData)
+        created = series[0]
+      } else {
+        created = await transactions.create(payload.tx)
+      }
       if (payload.recurringData) {
         await recurring.create({
           description: payload.tx.description,
@@ -475,7 +556,8 @@ export default function TransactionsPage() {
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => transactions.delete(id),
+    mutationFn: (payload: { id: string; applyTo?: TransactionApplyScope }) =>
+      transactions.delete(payload.id, payload.applyTo ?? 'this'),
     onSuccess: () => {
       invalidateAfterTxMutation()
       setDialogOpen(false)
@@ -564,6 +646,20 @@ export default function TransactionsPage() {
     },
   })
 
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false)
+  const bulkDeleteMutation = useMutation({
+    mutationFn: () => transactions.bulkDelete(Array.from(selectedIds)),
+    onSuccess: (result) => {
+      invalidateAfterTxMutation()
+      setSelectedIds(new Set())
+      setBulkDeleteConfirmOpen(false)
+      toast.success(t('transactions.bulkDeleteSuccess', { count: result.deleted }))
+    },
+    onError: (error) => {
+      toast.error(extractApiError(error))
+    },
+  })
+
   const createCounterpartMutation = useMutation({
     mutationFn: ({ anchorId, toAccountId }: { anchorId: string; toAccountId: string }) =>
       transactions.createTransferCounterpart(anchorId, toAccountId),
@@ -600,7 +696,7 @@ export default function TransactionsPage() {
       date: string
       description: string
       notes?: string
-      fx_rate?: number
+      destination_amount?: number
     }) => transactions.createTransfer(data),
     onSuccess: () => {
       invalidateAfterTxMutation()
@@ -666,6 +762,36 @@ export default function TransactionsPage() {
   // page count both reflect the same filtered total — issue #88.
   const filteredItems = data?.items ?? []
   const selectableItems = filteredItems.filter(tx => !tx.is_shared)
+
+  // Group transactions by date for the mobile card view
+  const groupedByDate = useMemo(() => {
+    const groups: { date: string; label: string; items: Transaction[] }[] = []
+    let current: { date: string; label: string; items: Transaction[] } | null = null
+    for (const tx of filteredItems) {
+      if (!current || current.date !== tx.date) {
+        current = {
+          date: tx.date,
+          label: new Date(tx.date + 'T00:00:00').toLocaleDateString(dateLocale, {
+            weekday: 'short',
+            day: 'numeric',
+            month: 'short',
+            year: 'numeric',
+          }),
+          items: [],
+        }
+        groups.push(current)
+      }
+      current.items.push(tx)
+    }
+    return groups
+  }, [filteredItems, dateLocale])
+
+  // Pre-resolve accounts into a Map for O(1) lookup in the mobile card view
+  const accountById = useMemo(() => {
+    const map = new Map<string, typeof accountsList extends (infer T)[] | undefined ? T : never>()
+    for (const a of accountsList ?? []) map.set(a.id, a)
+    return map
+  }, [accountsList])
 
   const toggleSelectAll = () => {
     if (!selectableItems.length) return
@@ -741,13 +867,14 @@ export default function TransactionsPage() {
   }
 
   const handleTransactionSave = (
-    data: Partial<Transaction>,
+    data: TransactionSavePayload,
     recurringData?: { frequency: string; end_date?: string },
+    installmentData?: InstallmentSeriesInput,
     pendingFiles?: File[],
     action?: SaveAction,
   ) => {
     if (!editingTx) {
-      createMutation.mutate({ tx: data, recurringData, pendingFiles, action })
+      createMutation.mutate({ tx: data, recurringData, installmentData, pendingFiles, action })
       return
     }
 
@@ -764,13 +891,19 @@ export default function TransactionsPage() {
     updateMutation.mutate({ id: editingTx.id, ...data })
   }
 
+  const submitPendingSeriesDelete = (scope: TransactionApplyScope) => {
+    if (!pendingSeriesDeleteId) return
+    deleteMutation.mutate({ id: pendingSeriesDeleteId, applyTo: scope })
+    setPendingSeriesDeleteId(null)
+  }
+
   // Open the Add Transaction dialog seeded from an existing row's
   // fields (issue #158). Identity-bearing fields (id, transfer_pair,
   // installment series, splits) are dropped so the dialog treats the
   // result as a brand-new transaction; the user can tweak the date or
   // any other field before saving.
   const handleDuplicateTransaction = (tx: Transaction) => {
-    const draft: Partial<Transaction> = {
+    const draft: TransactionEditPayload = {
       description: tx.description,
       amount: tx.amount,
       currency: tx.currency,
@@ -789,6 +922,27 @@ export default function TransactionsPage() {
     setDialogOpen(true)
   }
 
+  const handleOpenCalendarTransaction = async (id: string) => {
+    try {
+      const tx = await transactions.get(id)
+      setEditingTx(tx)
+      setDuplicateDraft(null)
+      setDialogOpen(true)
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }
+
+  const handleHideIgnoredChange = (next: boolean) => {
+    setHideIgnored(next)
+    setPage(1)
+    try {
+      localStorage.setItem(HIDE_IGNORED_STORAGE_KEY, String(next))
+    } catch {
+      // Private mode or a full quota: the filter still applies for this visit.
+    }
+  }
+
   const handleExport = async () => {
     setExporting(true)
     try {
@@ -802,11 +956,13 @@ export default function TransactionsPage() {
           category_ids: filterCategoryIds.length > 0 ? filterCategoryIds : undefined,
           payee_id: filterPayee || undefined,
           type: filterType || undefined,
+          status: filterStatus || undefined,
           uncategorized: filterUncategorized ? true : undefined,
           from: filterFrom || undefined,
           to: filterTo || undefined,
           q: searchQuery || undefined,
           tags: tagFilters.length > 0 ? tagFilters : undefined,
+          exclude_ignored: hideIgnored ? true : undefined,
         })
       }
       toast.success(t('transactions.exportSuccess'))
@@ -962,11 +1118,10 @@ export default function TransactionsPage() {
               </span>
                             )
             }
-            {(tx.recurring_transaction_id != null ||
-              recurringList?.some(r => r.description === tx.description && r.type === tx.type)) && (
+            {tx.recurring_transaction_id != null && (
               <span
                 className="text-[10px] font-semibold uppercase tracking-wide text-primary bg-primary/5 border border-primary/10 px-1.5 py-0.5 rounded-full"
-                title={tx.recurring_transaction_id != null ? t('transactions.recurringLinkedTooltip') : undefined}
+                title={t('transactions.recurringLinkedTooltip')}
               >
                 {t('transactions.recurringBadge')}
               </span>
@@ -981,6 +1136,14 @@ export default function TransactionsPage() {
                 {tx.installment_number}/{tx.total_installments}
               </span>
             )}
+            {shouldShowPendingBadge(tx) && (
+              <span
+                title={t('transactions.pending')}
+                className="shrink-0 inline-flex items-center justify-center rounded-full border border-amber-200 bg-amber-50 p-0.5 dark:border-amber-500/30 dark:bg-amber-500/10"
+              >
+                <Clock size={12} className="text-amber-500" role="img" aria-label={t('transactions.pending')} />
+              </span>
+            )}
             {(tx.attachment_count ?? 0) > 0 && (
               <Paperclip size={12} className="text-muted-foreground shrink-0" />
             )}
@@ -991,7 +1154,7 @@ export default function TransactionsPage() {
           {(showInlineNotes || showInlineTags) && tx.notes && (
             <div className="mt-1 space-y-0.5">
               {showInlineNotes && noteText && (
-                <p className="text-xs text-muted-foreground italic leading-snug">{noteText}</p>
+                <p className="text-xs text-muted-foreground italic leading-snug truncate">{noteText}</p>
               )}
               {showInlineTags && noteTags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
@@ -1155,7 +1318,16 @@ export default function TransactionsPage() {
               prevLabel: t('transactions.monthPrevious'),
               nextLabel: t('transactions.monthNext'),
             }}
-            columnPicker={<TransactionsColumnPicker state={grid} />}
+            view={{
+              value: viewMode,
+              onChange: (value) => {
+                if (value === 'calendar' && filterAccountIds.length > 1) setFilterAccountIds([])
+                setViewMode(value)
+              },
+              listLabel: t('transactions.listView'),
+              calendarLabel: t('transactions.calendarView'),
+            }}
+            columnPicker={viewMode === 'list' ? <TransactionsColumnPicker state={grid} /> : null}
             exportLabel={exportLabel}
             exporting={exporting}
             onExport={handleExport}
@@ -1184,7 +1356,8 @@ export default function TransactionsPage() {
           setSearchQuery(text)
         }}
         filterAccountIds={filterAccountIds}
-        onAccountIdsChange={(v) => { setFilterAccountIds(v); setPage(1) }}
+        onAccountIdsChange={(v) => { setFilterAccountIds(viewMode === 'calendar' ? v.slice(0, 1) : v); setPage(1) }}
+        accountSelectionMode={viewMode === 'calendar' ? 'single' : 'multiple'}
         filterCategoryIds={filterCategoryIds}
         onCategoryIdsChange={(v) => { setFilterCategoryIds(v); setPage(1) }}
         filterUncategorized={filterUncategorized}
@@ -1195,6 +1368,10 @@ export default function TransactionsPage() {
         onGroupIdChange={(v) => { setFilterGroupId(v); setPage(1) }}
         filterType={filterType}
         onTypeChange={(v) => { setFilterType(v); setPage(1) }}
+        filterStatus={filterStatus}
+        onStatusChange={(v) => { setFilterStatus(v); setPage(1) }}
+        hideIgnored={hideIgnored}
+        onHideIgnoredChange={handleHideIgnoredChange}
         filterFrom={filterFrom}
         filterTo={filterTo}
         onDateRangeChange={(from, to) => { setFilterFrom(from); setFilterTo(to); setPage(1) }}
@@ -1210,8 +1387,10 @@ export default function TransactionsPage() {
           setFilterPayee('')
           setFilterGroupId('')
           setFilterType('')
+          setFilterStatus('')
           setFilterMinAmount('')
           setFilterMaxAmount('')
+          handleHideIgnoredChange(false)
           setSearchInput('')
           setSearchQuery('')
           clearTagFilters()
@@ -1263,7 +1442,23 @@ export default function TransactionsPage() {
         </div>
       )}
 
-      {/* Table */}
+      {viewMode === 'calendar' && (
+        <TransactionCalendarView
+          calendar={calendarData}
+          isLoading={calendarLoading}
+          locale={locale}
+          dateLocale={dateLocale}
+          mask={mask}
+          selectedDate={calendarSelectedDate}
+          onSelectedDateChange={setCalendarSelectedDate}
+          onOpenTransaction={handleOpenCalendarTransaction}
+          accounts={accountsList}
+          userCurrency={userCurrency}
+        />
+      )}
+
+      {/* Table / Mobile Cards */}
+      {viewMode === 'list' && (
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden mb-4">
         {isLoading ? (
           <div className="p-6 space-y-3">
@@ -1271,7 +1466,50 @@ export default function TransactionsPage() {
               <Skeleton key={i} className="h-14 w-full" />
             ))}
           </div>
+        ) : isMobile ? (
+          /* ── Mobile card view: grouped by date ── */
+          <div>
+            {groupedByDate.map((group) => (
+              <div key={group.date}>
+                <div className="bg-muted/80 px-4 py-1.5 border-b border-border">
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    {group.label}
+                  </span>
+                </div>
+                {group.items.map((tx) => (
+                  <MobileTransactionRow
+                    key={tx.id}
+                    tx={tx}
+                    account={tx.account_id ? accountById.get(tx.account_id) : undefined}
+                    groupName={tx.group_id ? groupNameById.get(tx.group_id) : undefined}
+                    selected={selectedIds.has(tx.id)}
+                    selectable={canWrite && !tx.is_shared}
+                    canWrite={canWrite}
+                    highlighted={tx.id === highlightId}
+                    highlightedRowRef={tx.id === highlightId ? highlightedRowRef : undefined}
+                    locale={locale}
+                    userCurrency={userCurrency}
+                    onSelect={toggleSelect}
+                    onClick={(t) => {
+                      if (t.is_shared) {
+                        if (t.group_id) navigate(`/groups/${t.group_id}`)
+                        return
+                      }
+                      setEditingTx(t)
+                      setDialogOpen(true)
+                    }}
+                  />
+                ))}
+              </div>
+            ))}
+            {filteredItems.length === 0 && (
+              <div className="text-center py-16 text-muted-foreground">
+                {t('transactions.noResults')}
+              </div>
+            )}
+          </div>
         ) : (
+          /* ── Desktop table view ── */
           <div className="overflow-x-auto">
           <Table style={{ tableLayout: 'fixed' }}>
             <TableHeader>
@@ -1343,33 +1581,72 @@ export default function TransactionsPage() {
         {/* Filtered summary (issue #185): income / expenses / net across
             ALL rows matching the active filters — not just this page. */}
         {!isLoading && data?.summary && filteredItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-5 gap-y-1 border-t border-border bg-muted/30 px-4 py-2.5">
-            <span className="mr-auto text-xs text-muted-foreground">
-              {t('transactions.summaryCount', { count: data.total })}
-            </span>
-            {/* Excluded (#242): transfers / investments / ignored, kept out of
-                income/expense. Hidden when nothing was excluded in range. */}
-            {data.summary.excluded > 0 && (
+          <div className="flex flex-col sm:flex-row flex-wrap sm:items-center gap-x-5 gap-y-1 border-t border-border bg-muted/30 px-4 py-2.5">
+            {/* Mobile: count + saldo on first line */}
+            <div className="flex items-center justify-between sm:hidden">
+              <span className="text-xs text-muted-foreground">
+                {t('transactions.summaryCount', { count: data.total })}
+              </span>
               <span className="flex items-baseline gap-1.5 text-xs">
+                <span className="text-muted-foreground">{t('transactions.summaryNet')}</span>
+                <span
+                  className={`text-sm font-bold tabular-nums ${
+                    data.summary.net >= 0 ? 'text-emerald-600' : 'text-rose-500'
+                  }`}
+                >
+                  {mask(formatCurrency(data.summary.net, data.summary.currency, locale))}
+                </span>
+              </span>
+            </div>
+            {/* Mobile: receitas + despesas on second line */}
+            <div className="flex items-center justify-between sm:hidden">
+              <span className="flex items-baseline gap-1.5 text-xs">
+                <span className="text-muted-foreground">{t('transactions.summaryIncome')}</span>
+                <span className="text-sm font-semibold tabular-nums text-emerald-600">
+                  {mask(formatCurrency(data.summary.income, data.summary.currency, locale))}
+                </span>
+              </span>
+              <span className="flex items-baseline gap-1.5 text-xs">
+                <span className="text-muted-foreground">{t('transactions.summaryExpenses')}</span>
+                <span className="text-sm font-semibold tabular-nums text-rose-500">
+                  {mask(formatCurrency(data.summary.expense, data.summary.currency, locale))}
+                </span>
+              </span>
+            </div>
+            {/* Mobile: excluido on third line */}
+            {data.summary.excluded > 0 && (
+              <span className="flex items-baseline gap-1.5 text-xs sm:hidden">
                 <span className="text-muted-foreground">{t('transactions.summaryExcluded')}</span>
                 <span className="text-sm font-semibold tabular-nums text-muted-foreground">
                   {mask(formatCurrency(data.summary.excluded, data.summary.currency, locale))}
                 </span>
               </span>
             )}
-            <span className="flex items-baseline gap-1.5 text-xs">
+            {/* Desktop: original horizontal layout */}
+            <span className="mr-auto text-xs text-muted-foreground hidden sm:inline">
+              {t('transactions.summaryCount', { count: data.total })}
+            </span>
+            {data.summary.excluded > 0 && (
+              <span className="hidden sm:flex items-baseline gap-1.5 text-xs">
+                <span className="text-muted-foreground">{t('transactions.summaryExcluded')}</span>
+                <span className="text-sm font-semibold tabular-nums text-muted-foreground">
+                  {mask(formatCurrency(data.summary.excluded, data.summary.currency, locale))}
+                </span>
+              </span>
+            )}
+            <span className="hidden sm:flex items-baseline gap-1.5 text-xs">
               <span className="text-muted-foreground">{t('transactions.summaryIncome')}</span>
               <span className="text-sm font-semibold tabular-nums text-emerald-600">
                 {mask(formatCurrency(data.summary.income, data.summary.currency, locale))}
               </span>
             </span>
-            <span className="flex items-baseline gap-1.5 text-xs">
+            <span className="hidden sm:flex items-baseline gap-1.5 text-xs">
               <span className="text-muted-foreground">{t('transactions.summaryExpenses')}</span>
               <span className="text-sm font-semibold tabular-nums text-rose-500">
                 {mask(formatCurrency(data.summary.expense, data.summary.currency, locale))}
               </span>
             </span>
-            <span className="flex items-baseline gap-1.5 text-xs">
+            <span className="hidden sm:flex items-baseline gap-1.5 text-xs">
               <span className="text-muted-foreground">{t('transactions.summaryNet')}</span>
               <span
                 className={`text-sm font-bold tabular-nums ${
@@ -1382,9 +1659,10 @@ export default function TransactionsPage() {
           </div>
         )}
       </div>
+      )}
 
       {/* Pagination */}
-      {data && data.total > 10 && (
+      {viewMode === 'list' && data && data.total > 10 && (
         <div className={`flex flex-col sm:flex-row items-center justify-between gap-4 py-4 ${selectedIds.size > 0 ? 'pb-20' : ''}`}>
           <div className="hidden sm:block w-32" />
           {totalPages > 1 ? (
@@ -1441,14 +1719,12 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
-
       {/* Bulk Action Bar — aligned with the main content area: clears the
           fixed sidebar on lg+ and matches the page's max-w-7xl + p-6 wrapper
           so the bar visually sits over the transactions list, not the
           full viewport. */}
-      <div
-        className={`fixed bottom-0 left-0 right-0 lg:left-60 z-50 transition-transform duration-200 ease-out ${selectedIds.size > 0 ? 'translate-y-0' : 'translate-y-full'}`}
-      >
+      {viewMode === 'list' && selectedIds.size > 0 && (
+        <div className="fixed bottom-0 left-0 right-0 lg:left-60 z-50">
         <div className="mx-auto max-w-7xl px-3 md:px-6 pb-4 md:pb-6">
           <div className="flex items-stretch gap-1.5 bg-card border border-border shadow-xl rounded-2xl p-2">
             <MobileBulkSelectionActions
@@ -1475,6 +1751,7 @@ export default function TransactionsPage() {
               onTagInputChange={setBulkTagInput}
               onAddTags={(tags) => bulkAddTagsMutation.mutate({ ids: Array.from(selectedIds), tags })}
               onRemoveTags={(tags) => bulkRemoveTagsMutation.mutate({ ids: Array.from(selectedIds), tags })}
+              onBulkDelete={() => setBulkDeleteConfirmOpen(true)}
               onClear={() => { setSelectedIds(new Set()); setBulkCategory(''); setBulkTagInput('') }}
             />
 
@@ -1626,6 +1903,18 @@ export default function TransactionsPage() {
               )
             })()}
 
+            {/* Bulk Delete */}
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setBulkDeleteConfirmOpen(true)}
+              disabled={bulkDeleteMutation.isPending}
+              className="h-8 px-3 shrink-0 text-sm"
+            >
+              <Trash2 size={15} className="lg:mr-1.5" />
+              <span className="hidden lg:inline">{t('common.delete')}</span>
+            </Button>
+
             <div className="ml-auto" />
 
             {/* Close */}
@@ -1640,6 +1929,7 @@ export default function TransactionsPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Bulk Add-to-Group Dialog */}
       <BulkAddToGroupDialog
@@ -1697,9 +1987,21 @@ export default function TransactionsPage() {
         categories={categoriesList ?? []}
         categoryGroups={categoryGroupsList ?? []}
         accounts={accountsList ?? []}
-        recurringMatch={editingTx ? recurringList?.find(r => r.description === editingTx.description && r.type === editingTx.type) : undefined}
+        recurringMatch={
+          editingTx?.recurring_transaction_id
+            ? recurringById.get(editingTx.recurring_transaction_id)
+            : undefined
+        }
         onSave={handleTransactionSave}
-        onDelete={editingTx ? () => deleteMutation.mutate(editingTx.id) : undefined}
+        onDelete={editingTx ? () => {
+          if (isManualInstallmentSeriesRow(editingTx)) {
+            // Deleting one row of a manual series — ask the user
+            // whether to drop this, this+future, or all installments.
+            setPendingSeriesDeleteId(editingTx.id)
+          } else {
+            deleteMutation.mutate({ id: editingTx.id })
+          }
+        } : undefined}
         onUnlinkTransfer={(pairId) => unlinkTransferMutation.mutate(pairId)}
         onIgnoreChanged={invalidateAfterTxMutation}
         onCreateRule={(tx) => {
@@ -1749,6 +2051,76 @@ export default function TransactionsPage() {
               {updateMutation.isPending
                 ? t('common.loading')
                 : t('transactions.confirmTransferCategoryBoth')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Installment-series delete scope. Edit scope is handled by the shared
+          TransactionDialog so every edit surface behaves consistently. */}
+      <Dialog
+        open={!!pendingSeriesDeleteId}
+        onOpenChange={(open) => {
+          if (!open) setPendingSeriesDeleteId(null)
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('transactions.installmentScopeTitle')}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {t('transactions.installmentScopeDeleteDesc')}
+          </p>
+          <DialogFooter className="flex-col sm:flex-row sm:justify-end gap-2">
+            <Button
+              autoFocus
+              onClick={() => submitPendingSeriesDelete('this')}
+              disabled={updateMutation.isPending || deleteMutation.isPending}
+              className="justify-center"
+            >
+              {updateMutation.isPending || deleteMutation.isPending
+                ? t('common.loading')
+                : t('transactions.installmentScopeThis')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => submitPendingSeriesDelete('future')}
+              disabled={updateMutation.isPending || deleteMutation.isPending}
+              className="justify-center"
+            >
+              {t('transactions.installmentScopeFuture')}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => submitPendingSeriesDelete('all')}
+              disabled={updateMutation.isPending || deleteMutation.isPending}
+              className="justify-center"
+            >
+              {t('transactions.installmentScopeAll')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete confirmation */}
+      <Dialog open={bulkDeleteConfirmOpen} onOpenChange={setBulkDeleteConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('transactions.bulkDeleteTitle', { count: selectedIds.size })}</DialogTitle>
+            <DialogDescription>
+              {t('transactions.bulkDeleteDescription')}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setBulkDeleteConfirmOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={() => bulkDeleteMutation.mutate()}
+              disabled={bulkDeleteMutation.isPending}
+            >
+              {bulkDeleteMutation.isPending ? t('common.loading') : t('common.delete')}
             </Button>
           </DialogFooter>
         </DialogContent>

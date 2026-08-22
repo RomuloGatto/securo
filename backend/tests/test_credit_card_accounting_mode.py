@@ -1425,6 +1425,8 @@ class TestEffectiveBillDateFiltersList:
             date_from=date(2026, 3, 17), date_to=date(2026, 4, 16),
             bill_id=bill.id,
         )
+
+        assert summary is not None
         assert summary["monthly_income"] == 80.0
 
     @pytest.mark.asyncio
@@ -1482,6 +1484,8 @@ class TestEffectiveBillDateFiltersList:
             bill_id=bill.id,
         )
         # 44.90 (charge) - 44.90 (refund) + 32.50 (other) = 32.50
+
+        assert summary is not None
         assert summary["monthly_expenses"] == 32.50
 
     @pytest.mark.asyncio
@@ -1520,6 +1524,8 @@ class TestEffectiveBillDateFiltersList:
             session, checking.id, test_workspace.id,
             date_from=date(2026, 4, 1), date_to=date(2026, 4, 30),
         )
+
+        assert summary is not None
         assert summary["monthly_expenses"] == 50.0
         assert summary["monthly_income"] == 3000.0
 
@@ -1603,6 +1609,8 @@ class TestEffectiveBillDateFiltersList:
             bill_id=bill.id,
         )
         # Manual 50 counted, pending 99 excluded
+
+        assert summary is not None
         assert summary["monthly_expenses"] == 50.0
 
     @pytest.mark.asyncio
@@ -1678,14 +1686,15 @@ class TestEffectiveBillDateFiltersList:
         )
 
     @pytest.mark.asyncio
-    async def test_summary_includes_pending_sync_with_override(
+    async def test_summary_forecast_includes_pending_sync_with_override(
         self, session, test_user, test_workspace, cc_account
     ):
         """get_account_summary mirrors get_transactions: a pending sync tx
         with `effective_bill_date` in the cycle window must contribute to
-        the totals card and bar chart even when the override doesn't snap
-        to a bill's due_date (so bill_id stays null). Without this the
-        strip pill totals diverge from the tx list (issue #162)."""
+        the projected totals even when the override doesn't snap to a bill's
+        due_date (so bill_id stays null). Actual totals remain posted-only.
+        Without this the projected bill total diverges from the tx list
+        (issue #162)."""
         from app.services.account_service import get_account_summary
         from app.models.credit_card_bill import CreditCardBill
         from datetime import datetime, timezone
@@ -1715,7 +1724,10 @@ class TestEffectiveBillDateFiltersList:
             date_from=date(2026, 4, 17), date_to=date(2026, 5, 16),
             bill_id=may.id,
         )
-        assert summary["monthly_expenses"] == 105.0
+
+        assert summary is not None
+        assert summary["monthly_expenses"] == 0.0
+        assert summary["projected_expenses"] == 105.0
 
     @pytest.mark.asyncio
     async def test_override_past_in_progress_window_lands_in_in_progress(
@@ -1759,4 +1771,6 @@ class TestEffectiveBillDateFiltersList:
             date_from=date(2026, 4, 12), date_to=date(2026, 5, 11),
             unbilled_only=True,
         )
+
+        assert summary is not None
         assert summary["monthly_expenses"] == 59.90

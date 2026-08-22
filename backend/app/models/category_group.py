@@ -28,4 +28,7 @@ class CategoryGroup(Base):
     is_hidden: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
     user: Mapped["User"] = relationship(back_populates="category_groups")
-    categories: Mapped[list["Category"]] = relationship(back_populates="group")
+    categories: Mapped[list["Category"]] = relationship(
+        back_populates="group",
+        order_by="Category.name",
+    )
