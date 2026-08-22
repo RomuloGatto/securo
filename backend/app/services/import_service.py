@@ -8,10 +8,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from ofxparse import OfxParser
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from types import SimpleNamespace
 
 from app.core.config import get_settings
 from app.models.account import Account
@@ -21,8 +19,8 @@ from app.models.transaction import Transaction
 from app.schemas.transaction import TransactionImport
 from app.services import recurring_match_service
 from app.services.credit_card_service import apply_effective_date
-from app.services.rule_engine import apply_rule_actions, evaluate_conditions
-from app.services.rule_service import apply_rules_to_transaction
+from app.services.rule_engine import apply_rule_actions, evaluate_conditions, merge_notes
+from app.services.rule_service import apply_rules_to_transaction, preview_rules_for_transaction
 from app.services.fx_rate_service import stamp_primary_amount
 from app.services.payee_service import get_or_create_payee
 
@@ -38,7 +36,18 @@ _OFX_BALANCE_ROW_DESCRIPTIONS = (
 )
 
 
-def _preprocess_ofx_for_empty_fitid(content: bytes) -> bytes:
+def _decode_ofx_bytes(content: bytes) -> tuple[str, str]:
+    """Decode OFX content to text, trying UTF-8 then falling back to Latin-1.
+
+    Returns (text, encoding) so callers can re-encode consistently later.
+    """
+    try:
+        return content.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        return content.decode("latin-1"), "latin-1"
+
+
+def _patch_empty_fitids(text: str) -> str:
     """Synthesize a FITID for STMTTRN blocks that have an empty/missing one.
 
     Banco do Brasil (and a few other Brazilian banks) emit balance-summary
@@ -47,13 +56,6 @@ def _preprocess_ofx_for_empty_fitid(content: bytes) -> bytes:
     each affected block with a deterministic synthetic FITID so parsing
     succeeds; balance rows are filtered out later by description.
     """
-    try:
-        text = content.decode("utf-8")
-        original_encoding = "utf-8"
-    except UnicodeDecodeError:
-        text = content.decode("latin-1")
-        original_encoding = "latin-1"
-
     def _replace(match: re.Match) -> str:
         block = match.group(0)
         fitid_match = re.search(r"<FITID>([^<\r\n]*)", block, re.IGNORECASE)
@@ -74,13 +76,56 @@ def _preprocess_ofx_for_empty_fitid(content: bytes) -> bytes:
             flags=re.IGNORECASE,
         )
 
-    patched = re.sub(
+    return re.sub(
         r"<STMTTRN>.*?</STMTTRN>",
         _replace,
         text,
         flags=re.IGNORECASE | re.DOTALL,
     )
-    return patched.encode(original_encoding, errors="replace")
+
+
+def _ensure_ofx_sgml_header(text: str, encoding: str) -> str:
+    """Prepend a legacy OFX 1.x SGML header for OFX 2.x files that omit it.
+
+    OFX 2.x is plain XML that goes straight into its first tag, with no
+    colon-delimited SGML header block (e.g. Erste Bank's "MS Money Sunset
+    Deluxe" export). ofxparse only looks for encoding hints in the bytes
+    preceding the file's first "<"; when that's empty it silently assumes
+    ASCII and crashes on any non-ASCII byte. Prepending a synthetic SGML
+    header routes the file through ofxparse's existing, correctly-working
+    SGML decode path instead of its broken auto-detection (see
+    https://github.com/jseutter/ofxparse/issues/133).
+
+    The trigger is therefore "nothing precedes the first tag", not "starts
+    with <?xml": the XML declaration is optional in XML 1.0, so an OFX 2.x
+    file may open with just its <?OFX ... ?> instruction, or with <OFX>
+    itself, and those hit the same ofxparse bug. Anything else already has a
+    legacy header, and a file with no tag at all is left for ofxparse to
+    reject on its own terms.
+
+    `encoding` must match whatever the caller will re-encode `text` with,
+    so the declared header and the actual bytes stay consistent.
+    """
+    preamble, first_tag, _ = text.lstrip("\ufeff \t\r\n").partition("<")
+    if not first_tag or preamble.strip():
+        return text
+    if encoding == "latin-1":
+        enc_lines = "ENCODING:USASCII\r\nCHARSET:8859-1\r\n"
+    else:
+        enc_lines = "ENCODING:UTF-8\r\nCHARSET:NONE\r\n"
+    header = (
+        f"OFXHEADER:100\r\nDATA:OFXSGML\r\nVERSION:102\r\nSECURITY:NONE\r\n"
+        f"{enc_lines}COMPRESSION:NONE\r\nOLDFILEUID:NONE\r\nNEWFILEUID:NONE\r\n\r\n"
+    )
+    return header + text
+
+
+def _preprocess_ofx(content: bytes) -> bytes:
+    """Apply text-level fixups ofxparse needs before it can parse the file."""
+    text, encoding = _decode_ofx_bytes(content)
+    text = _patch_empty_fitids(text)
+    text = _ensure_ofx_sgml_header(text, encoding)
+    return text.encode(encoding, errors="replace")
 
 
 def _is_balance_summary_row(description: str | None) -> bool:
@@ -92,7 +137,7 @@ def _is_balance_summary_row(description: str | None) -> bool:
 
 def parse_ofx(content: bytes) -> list[TransactionImport]:
     """Parse OFX file content and return transactions."""
-    content = _preprocess_ofx_for_empty_fitid(content)
+    content = _preprocess_ofx(content)
     ofx = OfxParser.parse(io.BytesIO(content))
     transactions = []
 
@@ -120,8 +165,50 @@ def parse_ofx(content: bytes) -> list[TransactionImport]:
     return transactions
 
 
-def parse_qif(content: bytes) -> list[TransactionImport]:
-    """Parse QIF file content and return transactions."""
+# QIF "D" lines carry no format metadata; US-first order is the historical
+# default. The Quicken apostrophe variants are always month-first.
+_QIF_FALLBACK_DATE_FORMATS = [
+    '%m/%d/%Y', '%d/%m/%Y', '%Y-%m-%d',
+    "%m/%d'%Y", "%m/%d'%y",
+    '%m/%d/%y', '%d/%m/%y',
+]
+
+
+def _qif_date_formats(date_format: str | None, raw_dates: list[str]) -> list[str]:
+    """Decide the strptime formats for a QIF file's dates, once per file.
+
+    An explicit user choice is strict (like parse_csv): only that format and
+    its 2-digit-year variant are accepted. Otherwise the order is inferred
+    from the whole file — a first component > 12 can only be a day, so the
+    file is DD/MM; per-line first-match parsing would silently mix MM/DD and
+    DD/MM within a single import for the ambiguous days 1-12.
+    """
+    if date_format and date_format in DATE_FORMAT_MAP:
+        fmt = DATE_FORMAT_MAP[date_format]
+        return [fmt, fmt.replace('%Y', '%y')]
+
+    saw_day_first = saw_month_first = False
+    for value in raw_dates:
+        match = re.match(r"^(\d{1,2})/(\d{1,2})/\d{2,4}$", value)
+        if not match:
+            continue
+        first, second = int(match.group(1)), int(match.group(2))
+        if first > 12 >= second:
+            saw_day_first = True
+        if second > 12 >= first:
+            saw_month_first = True
+
+    if saw_day_first and not saw_month_first:
+        return ['%d/%m/%Y', '%d/%m/%y'] + _QIF_FALLBACK_DATE_FORMATS
+    return list(_QIF_FALLBACK_DATE_FORMATS)
+
+
+def parse_qif(content: bytes, date_format: str | None = None) -> list[TransactionImport]:
+    """Parse QIF file content and return transactions.
+
+    date_format: optional explicit format (see DATE_FORMAT_MAP keys); when
+    omitted, the day/month order is inferred from the whole file.
+    """
     # Try UTF-8 first, fall back to Latin-1 for legacy software (e.g. Microsoft Money)
     try:
         text = content.decode('utf-8-sig')
@@ -131,6 +218,15 @@ def parse_qif(content: bytes) -> list[TransactionImport]:
 
     # Split into transaction blocks by "^"
     blocks = text.split('^')
+
+    raw_dates = [
+        stripped[1:].strip()
+        for block in blocks
+        for stripped in (line.strip() for line in block.strip().splitlines())
+        if stripped.startswith('D')
+    ]
+    date_formats = _qif_date_formats(date_format, raw_dates)
+
     for block in blocks:
         lines = block.strip().splitlines()
         if not lines:
@@ -147,12 +243,7 @@ def parse_qif(content: bytes) -> list[TransactionImport]:
                 continue
             tag, value = line[0], line[1:]
             if tag == 'D':
-                # Try common date formats (including 2-digit year variants)
-                for fmt in [
-                    '%m/%d/%Y', '%d/%m/%Y', '%Y-%m-%d',
-                    "%m/%d'%Y", "%m/%d'%y",
-                    '%m/%d/%y', '%d/%m/%y',
-                ]:
+                for fmt in date_formats:
                     try:
                         txn_date = datetime.strptime(value.strip(), fmt).date()
                         break
@@ -289,6 +380,7 @@ DATE_FORMAT_MAP = {
 CSV_MAPPABLE_FIELDS = (
     'date', 'description', 'amount', 'type',
     'category', 'currency', 'fx_rate', 'inflow', 'outflow',
+    'payee', 'external_id', 'notes',
 )
 
 
@@ -338,7 +430,7 @@ def parse_csv(
     reader = csv.DictReader(io.StringIO(text), dialect=dialect)
 
     # Normalize field names
-    fieldnames = [f.lower().strip() for f in (reader.fieldnames or [])]
+    fieldnames = [f.lower().strip() if f is not None else "" for f in (reader.fieldnames or [])]
 
     # Map common column names
     date_cols = ['date', 'data', 'dt', 'transaction_date', 'data_transacao']
@@ -348,6 +440,9 @@ def parse_csv(
     category_cols = ['category', 'categoria']
     currency_cols = ['currency', 'moeda', 'currency_code']
     fx_rate_cols = ['fx_rate', 'fx_rate_used', 'taxa_cambio', 'exchange_rate', 'taxa']
+    payee_cols = ['payee', 'merchant', 'beneficiary', 'beneficiario', 'pagador']
+    external_id_cols = [] # External ID must be mapped explicitly
+    notes_cols = ['notes', 'nota', 'observacao']
 
     # Normalize the user-supplied column mapping (Securo field -> CSV header).
     mapping = {
@@ -398,6 +493,9 @@ def parse_csv(
     category_col = resolve_col('category', category_cols)
     currency_col = resolve_col('currency', currency_cols)
     fx_rate_col = resolve_col('fx_rate', fx_rate_cols)
+    payee_col = resolve_col('payee', payee_cols)
+    external_id_col = resolve_col('external_id', external_id_cols)
+    notes_col = resolve_col('notes', notes_cols)
 
     if not date_col or not desc_col:
         raise ValueError(
@@ -414,12 +512,12 @@ def parse_csv(
     if date_format and date_format in DATE_FORMAT_MAP:
         date_formats = [DATE_FORMAT_MAP[date_format]]
     else:
-        date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y']
+        date_formats = ['%Y-%m-%d', '%d/%m/%Y', '%d-%m-%Y', '%m/%d/%Y', '%d.%m.%Y']
 
     transactions = []
     for row in reader:
         # Normalize row keys
-        row = {k.lower().strip(): v for k, v in row.items()}
+        row = {k.lower().strip() if k is not None else "": v for k, v in row.items()}
 
         # Parse date
         date_str = row[date_col].strip()
@@ -487,6 +585,10 @@ def parse_csv(
                 except Exception:
                     pass
 
+        txn_payee = row[payee_col].strip() if payee_col and row.get(payee_col) else None
+        txn_external_id = row[external_id_col].strip() if external_id_col and row.get(external_id_col) else None
+        txn_notes = row[notes_col].strip() if notes_col and row.get(notes_col) else None
+
         transactions.append(TransactionImport(
             description=row[desc_col].strip(),
             amount=abs(amount),
@@ -495,6 +597,9 @@ def parse_csv(
             currency=txn_currency,
             fx_rate=txn_fx_rate,
             category_name=category_name,
+            payee_raw=txn_payee,
+            external_id=txn_external_id,
+            notes=txn_notes,
         ))
 
     return transactions
@@ -521,7 +626,7 @@ async def enrich_with_category_suggestions(
         return transactions
 
     for txn in transactions:
-        proxy = SimpleNamespace(
+        proxy: Transaction = Transaction(
             description=txn.description,
             amount=txn.amount,
             date=txn.date,
@@ -606,12 +711,10 @@ async def import_transactions(
         txn_currency = txn_data.currency or account_currency
 
         if should_detect_duplicates:
-            # Duplicate detection: use external_id when available (OFX FITID),
-            # fall back to field-based matching for formats without unique IDs.
-            # When matching by external_id, also require the same `date` so that
-            # Brazilian credit-card installments — where some banks reuse one
-            # purchase FITID across every monthly statement — don't get skipped
-            # as duplicates from later monthly imports (issue #98).
+            # Prefer an external ID (OFX FITID), with date retained because some
+            # Brazilian cards reuse one purchase FITID across monthly installments.
+            # Formats without unique IDs fall back to transaction fields; compare
+            # both descriptions because rules may have changed the displayed one.
             if txn_data.external_id:
                 existing = await session.execute(
                     select(Transaction).where(
@@ -627,63 +730,47 @@ async def import_transactions(
                         Transaction.date == txn_data.date,
                         Transaction.amount == txn_data.amount,
                         Transaction.type == txn_data.type,
-                        Transaction.description == txn_data.description,
+                        or_(
+                            Transaction.description == txn_data.description,
+                            Transaction.original_description == txn_data.description,
+                        ),
                     )
                 )
-            # `.first()` rather than `.scalar_one_or_none()`: the dedup key can
-            # legitimately match more than one row (e.g. a prior sync/import race
-            # left a duplicate, or a bank reuses one FITID across statements),
-            # and we only need to know whether *any* match exists. Requiring
-            # exactly one would raise MultipleResultsFound and abort the import.
+            # `.first()` is intentional: duplicate keys can legitimately match
+            # multiple rows after an import/sync race or reused bank identifier,
+            # and duplicate detection only needs to establish that any row exists.
             if existing.scalars().first() is not None:
                 skipped += 1
                 continue
 
-        # Resolve payee entity from raw payee text (OFX/QIF)
         import_payee_id = None
         import_payee_raw = getattr(txn_data, "payee_raw", None)
         if import_payee_raw:
             import_payee_entity = await get_or_create_payee(
-                session, user_id, import_payee_raw, workspace_id=workspace_id
+                session, user_id, import_payee_raw, workspace_id=workspace_id,
+                source="import",
             )
             import_payee_id = import_payee_entity.id
 
-        # Recurring bill reconciliation (issue #116): if this imported charge
-        # fulfills a generated placeholder, merge into it instead of creating a
-        # duplicate; the recurring link is preserved.
-        placeholder = await recurring_match_service.find_placeholder_for_incoming(
-            session, account_id, txn_data.amount, txn_currency, txn_data.type,
-            txn_data.date, txn_data.description,
-        )
-        if placeholder and not placeholder.is_ignored:
-            placeholder.source = source
-            placeholder.external_id = txn_data.external_id
-            placeholder.import_id = import_log.id
-            if import_payee_raw and not placeholder.payee:
-                placeholder.payee = import_payee_raw
-                placeholder.payee_id = import_payee_id
-            imported += 1
-            continue
-
-        # Otherwise, link to an active bill's next occurrence if this fulfills it.
-        recurring_link = await recurring_match_service.find_bill_for_incoming(
-            session, user_id, account_id, txn_data.amount, txn_currency, txn_data.type,
-            txn_data.date, txn_data.description,
-        )
-
         user_category_id = txn_data.category_id
         suggested_cat_id = txn_data.suggested_category_id
-        csv_category_id = category_map.get(txn_data.category_name) if txn_data.category_name else None
-        if txn_data.force_uncategorized:
-            category_id = None
-        else:
-            category_id = user_category_id or suggested_cat_id or csv_category_id
+        csv_category_id = (
+            category_map.get(txn_data.category_name)
+            if txn_data.category_name
+            else None
+        )
+        category_id = (
+            None
+            if txn_data.force_uncategorized
+            else user_category_id or suggested_cat_id or csv_category_id
+        )
 
-        transaction = Transaction(
+        incoming = Transaction(
             user_id=user_id,
             workspace_id=workspace_id,
             account_id=account_id,
             description=txn_data.description,
+            original_description=txn_data.description,
             amount=txn_data.amount,
             date=txn_data.date,
             type=txn_data.type,
@@ -694,24 +781,84 @@ async def import_transactions(
             payee=import_payee_raw,
             payee_id=import_payee_id,
             category_id=category_id,
-            recurring_transaction_id=recurring_link.id if recurring_link else None,
+            notes=getattr(txn_data, "notes", None),
         )
-        apply_effective_date(transaction, account)
+        apply_effective_date(incoming, account)
+        preview = await preview_rules_for_transaction(
+            session,
+            user_id,
+            incoming,
+            skip_category_rules=txn_data.force_uncategorized,
+        )
 
+        # Normalize a detached candidate before either recurring match. If a
+        # generated placeholder already represents this occurrence, upgrade it
+        # in place; otherwise link the new row to an active recurring definition.
+        placeholder = await recurring_match_service.find_placeholder_for_incoming(
+            session,
+            account_id,
+            txn_data.amount,
+            txn_currency,
+            txn_data.type,
+            txn_data.date,
+            preview.description,
+        )
+        if placeholder and not placeholder.is_ignored:
+            placeholder.source = source
+            placeholder.external_id = txn_data.external_id
+            placeholder.import_id = import_log.id
+            placeholder.status = "posted"
+            # The rules already ran, against the incoming charge, to build
+            # `preview`. Fold that result in rather than re-running them
+            # against the placeholder: its description is the recurring
+            # definition's own wording, so conditions written for the bank's
+            # text would no longer match. Everything the user can already see
+            # wins, the charge only fills what is still empty, and only its
+            # provenance is recorded outright.
+            placeholder.original_description = txn_data.description
+            if placeholder.category_id is None:
+                placeholder.category_id = preview.category_id
+            if import_payee_raw and not placeholder.payee:
+                placeholder.payee = import_payee_raw
+            if placeholder.payee_id is None:
+                placeholder.payee_id = preview.payee_id
+            placeholder.notes = merge_notes(placeholder.notes, preview.notes)
+            if preview.is_ignored:
+                placeholder.is_ignored = True
+            imported += 1
+            continue
+
+        recurring_link = await recurring_match_service.find_bill_for_incoming(
+            session,
+            user_id,
+            account_id,
+            txn_data.amount,
+            txn_currency,
+            txn_data.type,
+            txn_data.date,
+            preview.description,
+        )
+        incoming.recurring_transaction_id = (
+            recurring_link.id if recurring_link else None
+        )
         if txn_data.fx_rate:
-            transaction.fx_rate_used = txn_data.fx_rate
-            transaction.amount_primary = txn_data.amount * txn_data.fx_rate
+            incoming.fx_rate_used = txn_data.fx_rate
+            incoming.amount_primary = txn_data.amount * txn_data.fx_rate
 
-        session.add(transaction)
+        session.add(incoming)
         await session.flush()
         if recurring_link is not None:
             recurring_match_service.advance_past(recurring_link, txn_data.date)
 
-        await apply_rules_to_transaction(session, user_id, transaction, skip_category_rules=txn_data.force_uncategorized)
+        await apply_rules_to_transaction(
+            session,
+            user_id,
+            incoming,
+            skip_category_rules=txn_data.force_uncategorized,
+        )
 
-        # Only auto-convert if no fx_rate was provided by the CSV
         if not txn_data.fx_rate:
-            await stamp_primary_amount(session, user_id, transaction)
+            await stamp_primary_amount(session, user_id, incoming)
 
         imported += 1
 
@@ -721,7 +868,7 @@ async def import_transactions(
     await session.commit()
     return imported, skipped, excluded_count, import_log.id
 
-def normalize_amount(amount_str: str) -> str:
+def normalize_amount(amount_str: str | None) -> str:
     """
     Normalize monetary string into a standard decimal format compatible with Decimal.
 
@@ -729,8 +876,10 @@ def normalize_amount(amount_str: str) -> str:
         1.442,20 -> 1442.20
         1,442.20 -> 1442.20
     """
+    if not amount_str:
+        return ""
 
-    amount_str = amount_str.replace('R$', '').strip()
+    amount_str = str(amount_str).replace('R$', '').strip()
 
     if ',' in amount_str and '.' in amount_str:
         if amount_str.rfind(',') > amount_str.rfind('.'):

@@ -35,7 +35,7 @@ class _VectorJSON(sqlalchemy.types.JSON):
         return literal(0.5)
 
 
-_pgv.Vector = _VectorJSON  # type: ignore[attr-defined]
+setattr(_pgv, "Vector", _VectorJSON)
 # ---------------------------------------------------------------------------
 
 import pytest  # noqa: E402
@@ -248,7 +248,7 @@ async def auth_token(client: AsyncClient, test_user: User) -> str:
 
 
 @pytest_asyncio.fixture
-def auth_headers(auth_token: str) -> dict:
+async def auth_headers(auth_token: str) -> dict:
     """Auth headers for authenticated requests."""
     return {"Authorization": f"Bearer {auth_token}"}
 
@@ -292,9 +292,57 @@ async def admin_auth_token(client: AsyncClient, test_superuser: User) -> str:
 
 
 @pytest_asyncio.fixture
-def admin_auth_headers(admin_auth_token: str) -> dict:
+async def admin_auth_headers(admin_auth_token: str) -> dict:
     """Auth headers for admin requests."""
     return {"Authorization": f"Bearer {admin_auth_token}"}
+
+
+@pytest_asyncio.fixture
+async def viewer_auth_headers(
+    session: AsyncSession, client: AsyncClient, test_workspace: Workspace
+) -> dict:
+    """A second user who is a `viewer` member of the test workspace.
+
+    Read-only by role. Exists so the write gate can be exercised over HTTP:
+    the enforcement is a dependency wrapper, so asserting it at the service
+    layer alone leaves the wiring between route and role untested — which is
+    exactly the gap that let an audit conclude the gate was missing when it
+    was not.
+    """
+    import bcrypt as _bcrypt
+
+    user = User(
+        id=uuid.uuid4(),
+        email="viewer-role@example.com",
+        hashed_password=_bcrypt.hashpw(b"viewerpass123", _bcrypt.gensalt()).decode(),
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+    )
+    session.add(user)
+    await session.flush()
+    session.add(
+        WorkspaceMember(
+            id=uuid.uuid4(),
+            workspace_id=test_workspace.id,
+            user_id=user.id,
+            role="viewer",
+        )
+    )
+    await session.commit()
+
+    response = await client.post(
+        "/api/auth/login",
+        data={"username": "viewer-role@example.com", "password": "viewerpass123"},
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 200, f"Viewer login failed: {response.text}"
+    return {
+        "Authorization": f"Bearer {response.json()['access_token']}",
+        # Explicit, because the viewer's *default* workspace resolution would
+        # otherwise decide which workspace this request lands in.
+        "X-Workspace-Id": str(test_workspace.id),
+    }
 
 
 @pytest_asyncio.fixture

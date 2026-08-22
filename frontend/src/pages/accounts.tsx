@@ -24,18 +24,10 @@ import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { Account, BankConnection } from '@/types'
-import {
-  Pencil,
-  Trash2,
-  RefreshCw,
-  TriangleAlert,
-  Unlink,
-  Plus,
-  Settings,
-  Archive,
-  Layers,
-} from 'lucide-react'
+import { RefreshCw, TriangleAlert, Unlink, Settings } from 'lucide-react'
 import { AccountIcon, ConnectionLogo, getAccountTypeConfig } from '@/components/account-icon'
+import { AccountPageActions } from '@/components/account-page-actions'
+import { AccountRowActions } from '@/components/account-row-actions'
 import { PageHeader } from '@/components/page-header'
 import { BankConnectDialog } from '@/components/bank-connect-dialog'
 import { ConnectorSelectDialog, type Provider } from '@/components/connector-select-dialog'
@@ -45,6 +37,7 @@ import { ConnectionSettingsDialog } from '@/components/connection-settings-dialo
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
+import { formatCurrency } from '@/lib/format'
 
 // Account types offered in the create/edit dialog. Shared between the manual
 // type selector and the connected-account override selector so the list stays
@@ -56,10 +49,6 @@ const ACCOUNT_TYPE_OPTIONS = [
   { value: 'investment', labelKey: 'accounts.typeInvestment' },
   { value: 'wallet', labelKey: 'accounts.typeWallet' },
 ] as const
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
-}
 
 function daysUntil(dateStr: string | null): number | null {
   if (!dateStr) return null
@@ -237,24 +226,12 @@ export default function AccountsPage() {
         section={t('accounts.title')}
         title={t('accounts.title')}
         action={
-          <div className="flex gap-2">
-            <Button variant="outline" className="gap-1.5" onClick={() => navigate('/collections')}>
-              <Layers size={16} />
-              {t('collections.title')}
-            </Button>
-            {canWrite && (
-              <>
-                <Button variant="outline" className="gap-1.5" onClick={() => setConnectorSelectOpen(true)}>
-                  <Plus size={16} />
-                  {t('accounts.connectBank')}
-                </Button>
-                <Button onClick={() => { setEditingAccount(null); setDialogOpen(true) }} className="gap-1.5">
-                  <Plus size={16} />
-                  {t('accounts.addManual')}
-                </Button>
-              </>
-            )}
-          </div>
+          <AccountPageActions
+            canWrite={canWrite}
+            onAddAccount={() => { setEditingAccount(null); setDialogOpen(true) }}
+            onConnectBank={() => setConnectorSelectOpen(true)}
+            onOpenCollections={() => navigate('/collections')}
+          />
         }
       />
 
@@ -296,33 +273,7 @@ export default function AccountsPage() {
                           </p>
                         </div>
                       </Link>
-                      {canWrite && (
-                        <div className="flex items-center gap-1 mr-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                            onClick={() => { setEditingAccount(acc); setDialogOpen(true) }}
-                            title={t('common.edit')}
-                          >
-                            <Pencil size={13} />
-                          </button>
-                          <button
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                            onClick={() => setClosingAccountId(acc.id)}
-                            title={t('accounts.close')}
-                          >
-                            <Archive size={13} />
-                          </button>
-                          <button
-                            className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                            onClick={() => setDeletingId(acc.id)}
-                            disabled={deleteMutation.isPending}
-                            title={t('common.delete')}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      )}
-                      <div className="text-right">
+                      <div className="shrink-0 text-right">
                         <p className={`text-xs sm:text-sm font-semibold tabular-nums ${(acc.type === 'credit_card' ? bal > 0 : bal < 0) ? 'text-rose-500' : 'text-foreground'}`}>
                           {mask(formatCurrency(bal, acc.currency, locale))}
                         </p>
@@ -336,6 +287,15 @@ export default function AccountsPage() {
                           </p>
                         )}
                       </div>
+                      {canWrite && (
+                        <AccountRowActions
+                          accountName={getAccountName(acc)}
+                          onEdit={() => { setEditingAccount(acc); setDialogOpen(true) }}
+                          onClose={() => setClosingAccountId(acc.id)}
+                          onDelete={() => setDeletingId(acc.id)}
+                          deletePending={deleteMutation.isPending}
+                        />
+                      )}
                     </div>
                   )
                 })}
@@ -456,25 +416,7 @@ export default function AccountsPage() {
                                   </p>
                                 </div>
                               </Link>
-                              {canWrite && (
-                                <div className="flex items-center gap-1 mr-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                                  <button
-                                    className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-                                    onClick={(e) => { e.preventDefault(); setEditingAccount(acc); setDialogOpen(true) }}
-                                    title={t('common.edit')}
-                                  >
-                                    <Pencil size={13} />
-                                  </button>
-                                  <button
-                                    className="p-1.5 rounded-md text-muted-foreground hover:text-amber-600 hover:bg-amber-50 transition-colors"
-                                    onClick={(e) => { e.preventDefault(); setClosingAccountId(acc.id) }}
-                                    title={t('accounts.close')}
-                                  >
-                                    <Archive size={13} />
-                                  </button>
-                                </div>
-                              )}
-                              <div className="text-right">
+                              <div className="shrink-0 text-right">
                                 <p className={`text-xs sm:text-sm font-semibold tabular-nums ${(acc.type === 'credit_card' ? bal > 0 : bal < 0) ? 'text-rose-500' : 'text-foreground'}`}>
                                   {mask(formatCurrency(bal, acc.currency, locale))}
                                 </p>
@@ -488,6 +430,14 @@ export default function AccountsPage() {
                                   </p>
                                 )}
                               </div>
+                              {canWrite && (
+                                <AccountRowActions
+                                  accountName={getAccountName(acc)}
+                                  onEdit={() => { setEditingAccount(acc); setDialogOpen(true) }}
+                                  onClose={() => setClosingAccountId(acc.id)}
+                                  deletePending={deleteMutation.isPending}
+                                />
+                              )}
                             </div>
                           )
                         })}

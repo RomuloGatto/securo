@@ -1,10 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
-import { auth as authApi, currencies as currenciesApi, workspaces as workspacesApi } from '@/lib/api'
+import { auth as authApi, currencies as currenciesApi, fiscal as fiscalApi, workspaces as workspacesApi } from '@/lib/api'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
@@ -37,7 +37,10 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { AlertTriangle, Archive, Plus, Save, Trash2, Users } from 'lucide-react'
-import type { WorkspaceMember, WorkspaceRole } from '@/types'
+import { WORKSPACE_KIND_LABEL_KEY } from '@/lib/workspace-kinds'
+import { countryFlag } from '@/lib/country-flag'
+import { countryName } from '@/lib/country-name'
+import type { WorkspaceKind, WorkspaceMember, WorkspaceRole } from '@/types'
 
 function labelForRole(role: WorkspaceRole, t: (key: string) => string): string {
   return {
@@ -73,7 +76,7 @@ const DEFAULT_WORKSPACE_COLOR = '#6366F1'
 const DEFAULT_WORKSPACE_ICON = 'briefcase'
 
 export default function WorkspaceSettingsPage() {
-  const { t } = useTranslation()
+  const { t, i18n } = useTranslation()
   const navigate = useNavigate()
   const localeForFormat = useDateLocale()
   const { current, canManage, workspaces: allWorkspaces, refresh, switchWorkspace } = useWorkspace()
@@ -83,6 +86,7 @@ export default function WorkspaceSettingsPage() {
   const [editName, setEditName] = useState('')
   const [editCurrency, setEditCurrency] = useState('')
   const [editLocale, setEditLocale] = useState('')
+  const [editJurisdiction, setEditJurisdiction] = useState('')
   const [editIcon, setEditIcon] = useState(DEFAULT_WORKSPACE_ICON)
   const [editColor, setEditColor] = useState(DEFAULT_WORKSPACE_COLOR)
   const [inviteOpen, setInviteOpen] = useState(false)
@@ -97,9 +101,18 @@ export default function WorkspaceSettingsPage() {
     setEditName(current.name)
     setEditCurrency(current.default_currency)
     setEditLocale(current.locale ?? '')
+    setEditJurisdiction(current.tax_jurisdiction ?? '')
     setEditIcon(current.icon ?? DEFAULT_WORKSPACE_ICON)
     setEditColor(current.color ?? DEFAULT_WORKSPACE_COLOR)
-  }, [current?.id, current?.name, current?.default_currency, current?.locale, current?.icon, current?.color])
+  }, [current?.id, current?.name, current?.default_currency, current?.locale, current?.tax_jurisdiction, current?.icon, current?.color])
+
+  // Which jurisdictions ship a pack. An empty choice is valid, not missing:
+  // with none set, documents are stored as free text with no mask.
+  const { data: jurisdictions } = useQuery({
+    queryKey: ['fiscal-jurisdictions'],
+    queryFn: fiscalApi.jurisdictions,
+    staleTime: Infinity,
+  })
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', current?.id],
@@ -120,6 +133,16 @@ export default function WorkspaceSettingsPage() {
   })
   const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
 
+  // The server lists codes; the user reads names. Sorted by the name actually
+  // shown, in the reader's own collation.
+  const sortedJurisdictions = useMemo(
+    () =>
+      [...(jurisdictions ?? [])].sort((a, b) =>
+        countryName(a, i18n.language).localeCompare(countryName(b, i18n.language), i18n.language),
+      ),
+    [jurisdictions, i18n.language],
+  )
+
   const statsQuery = useQuery({
     queryKey: ['workspace-stats', current?.id],
     queryFn: () => (current ? workspacesApi.stats(current.id) : Promise.resolve({ members: 0, accounts: 0, transactions: 0 })),
@@ -133,6 +156,7 @@ export default function WorkspaceSettingsPage() {
         name: editName,
         default_currency: editCurrency,
         locale: editLocale || (null as unknown as string),
+        tax_jurisdiction: editJurisdiction || null,
         icon: editIcon,
         color: editColor,
       })
@@ -254,6 +278,7 @@ export default function WorkspaceSettingsPage() {
   const stats = statsQuery.data ?? { members: 1, accounts: 0, transactions: 0 }
   const isManaged = !!current.managed_by_user_id
   const isManagerSelf = isManaged && current.managed_by_user_id === currentUser?.id
+  const kindLabelKey = WORKSPACE_KIND_LABEL_KEY[current.kind as WorkspaceKind]
 
   return (
     <div className="container max-w-5xl py-8 space-y-6">
@@ -269,6 +294,12 @@ export default function WorkspaceSettingsPage() {
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-xl font-semibold truncate">{current.name}</h1>
+              {/* Fixed at creation, so it reads as identity, not a control. */}
+              {kindLabelKey && (
+                <Badge variant="outline" className="text-[11px]">
+                  {t(kindLabelKey)}
+                </Badge>
+              )}
               {current.role && (
                 <Badge variant="secondary" className="text-[11px]">
                   {labelForRole(current.role, t)}
@@ -346,7 +377,7 @@ export default function WorkspaceSettingsPage() {
                     type="color"
                     value={editColor}
                     onChange={(e) => setEditColor(e.target.value)}
-                    className="h-10 w-10 p-1 rounded-lg cursor-pointer border border-input bg-background shrink-0"
+                    className="h-10 w-10 p-1 rounded-lg cursor-pointer border border-input bg-card shrink-0"
                     title={t('groups.color', 'Cor')}
                   />
                 </div>
@@ -371,8 +402,8 @@ export default function WorkspaceSettingsPage() {
             </div>
           </div>
 
-          {/* Region row — currency + locale */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Region row — currency, language, and where the workspace files */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-1.5">
               <Label htmlFor="ws-currency" className="text-[13px]">
                 {t('workspace.defaultCurrency')}
@@ -421,6 +452,35 @@ export default function WorkspaceSettingsPage() {
                   <SelectItem value="fr">Français</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ws-jurisdiction" className="text-[13px]">
+                {t('workspace.taxJurisdiction', 'Tax jurisdiction')}
+              </Label>
+              <Select
+                value={editJurisdiction || '__none__'}
+                onValueChange={(v) => setEditJurisdiction(v === '__none__' ? '' : v)}
+                disabled={!canManage}
+              >
+                <SelectTrigger id="ws-jurisdiction" className="h-10 rounded-lg w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">—</SelectItem>
+                  {sortedJurisdictions.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      <span className="mr-2">{countryFlag(code)}</span>
+                      {countryName(code, i18n.language)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {t(
+                  'workspace.taxJurisdictionHint',
+                  'Decides which fiscal documents this workspace is offered. Separate from the interface language.',
+                )}
+              </p>
             </div>
           </div>
         </div>
@@ -486,7 +546,7 @@ export default function WorkspaceSettingsPage() {
                           role: e.target.value as WorkspaceRole,
                         })
                       }
-                      className="h-9 w-32 rounded-lg border border-input bg-background px-2 text-sm"
+                      className="h-9 w-32 rounded-lg border border-input bg-card px-2 text-sm"
                     >
                       {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
                         <option key={r} value={r}>
@@ -583,7 +643,7 @@ export default function WorkspaceSettingsPage() {
                 id="invite-role"
                 value={inviteRole}
                 onChange={(e) => setInviteRole(e.target.value as WorkspaceRole)}
-                className="w-full h-10 rounded-lg border border-input bg-background px-3 text-sm"
+                className="w-full h-10 rounded-lg border border-input bg-card px-3 text-sm"
               >
                 {(['owner', 'editor', 'viewer'] as WorkspaceRole[]).map((r) => (
                   <option key={r} value={r}>

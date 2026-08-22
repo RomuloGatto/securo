@@ -28,6 +28,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import type { ReportResponse, CategoryTrendItem } from '@/types'
+import { formatCurrency } from '@/lib/format'
 
 // A small qualitative palette of well-separated hues for the composition
 // detail ring. Capped to a handful of slices, distinct colours make each
@@ -48,10 +49,6 @@ const SLICE_COLORS = [
   '#06B6D4', // cyan
 ]
 const OTHER_SLICE_COLOR = '#9CA3AF'
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
-}
 
 function formatCompact(value: number, currency = 'USD', locale = 'en-US') {
   return new Intl.NumberFormat(locale, {
@@ -846,8 +843,10 @@ export default function ReportsPage() {
                   contentStyle={tooltipStyle}
                 />
                 <ReferenceLine y={0} stroke="var(--border)" strokeDasharray="3 3" />
-                <Bar dataKey="income" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={24} />
-                <Bar dataKey="expenses" fill="#F43F5E" radius={[4, 4, 0, 0]} maxBarSize={24} />
+                  <Bar dataKey="income" fill="#10B981" radius={[4, 4, 0, 0]} maxBarSize={20} />
+                  <Bar dataKey="expenses" fill="#F43F5E" radius={[4, 4, 0, 0]} maxBarSize={20} />
+                  <Bar dataKey="projectedIncome" fill="#34D399" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} />
+                  <Bar dataKey="projectedExpenses" fill="#FB7185" radius={[4, 4, 0, 0]} maxBarSize={20} fillOpacity={0.65} />
                 <Line
                   type="monotone"
                   dataKey="value"
@@ -1196,6 +1195,7 @@ export default function ReportsPage() {
                       <button
                         onClick={() => setSparklinePage((p) => Math.max(0, p - 1))}
                         disabled={sparklinePage === 0}
+                        aria-label={t('common.previous')}
                         className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
@@ -1203,6 +1203,7 @@ export default function ReportsPage() {
                       <button
                         onClick={() => setSparklinePage((p) => Math.min(totalPages - 1, p + 1))}
                         disabled={sparklinePage >= totalPages - 1}
+                        aria-label={t('common.next')}
                         className="p-1 rounded text-muted-foreground hover:text-foreground disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                       >
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 18 15 12 9 6" /></svg>

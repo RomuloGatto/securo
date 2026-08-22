@@ -34,6 +34,7 @@ from app.providers.base import (
     ProviderUserActionRequired,
     SessionExpiredError,
     TransactionData,
+    default_oauth_redirect_uri,
     mask_last4,
 )
 
@@ -44,7 +45,8 @@ JWT_AUDIENCE = "api.enablebanking.com"
 JWT_LIFETIME_SECONDS = 3500  # under EB's 1h cap; refresh well before
 JWT_CACHE_REFRESH_BEFORE = 600  # re-mint with 10 min buffer
 
-DEFAULT_VALID_UNTIL_DAYS = 180
+MAX_VALID_UNTIL_DAYS = 179
+DEFAULT_VALID_UNTIL_DAYS = MAX_VALID_UNTIL_DAYS
 DEFAULT_PSU_TYPE = "personal"
 DEFAULT_HISTORY_DAYS = 90
 TRANSACTION_PAGE_LIMIT = 50  # safety cap
@@ -190,7 +192,10 @@ class EnableBankingProvider(BankProvider):
 
     @property
     def redirect_uri(self) -> str:
-        return get_settings().enable_banking_oauth_redirect_uri
+        return (
+            get_settings().enable_banking_oauth_redirect_uri
+            or default_oauth_redirect_uri()
+        )
 
     # ----- credentials -----
 
@@ -299,6 +304,9 @@ class EnableBankingProvider(BankProvider):
             inst_country = (item.get("country") or "").upper()
             if inst_country:
                 countries.add(inst_country)
+            if (maximum_consent_validity := item.get("maximum_consent_validity", None)) is not None:
+                maximum_consent_validity = timedelta(seconds=maximum_consent_validity).days
+
             institutions.append(
                 InstitutionData(
                     name=item.get("name") or "",
@@ -307,7 +315,7 @@ class EnableBankingProvider(BankProvider):
                     logo=item.get("logo"),
                     bic=item.get("bic"),
                     psu_types=list(item.get("psu_types") or []),
-                    max_consent_days=item.get("maximum_consent_validity"),
+                    max_consent_days=maximum_consent_validity,
                 )
             )
         institutions.sort(key=lambda i: (i.country, i.display_name.lower()))
@@ -328,6 +336,7 @@ class EnableBankingProvider(BankProvider):
         psu_type: str,
         valid_until_days: int,
     ) -> dict:
+        valid_until_days = min(valid_until_days, MAX_VALID_UNTIL_DAYS)
         valid_until_dt = datetime.now(timezone.utc) + timedelta(days=valid_until_days)
         # EB wants RFC3339 with a trailing 'Z' for UTC.
         valid_until = valid_until_dt.replace(microsecond=0).isoformat().replace(
