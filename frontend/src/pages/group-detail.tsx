@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
+import { getAccountName, sortAccountsByDisplayName } from '@/lib/account-utils'
 import { useNavigate, useParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -31,6 +32,7 @@ import {
   type GroupMemberPayload,
   type GroupSettlementPayload,
 } from '@/lib/api'
+import { localDateString } from '@/lib/date-utils'
 import { MemberForm } from '@/components/member-form'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
@@ -49,10 +51,7 @@ import { CategoryIcon } from '@/components/category-icon'
 import { DatePickerInput } from '@/components/ui/date-picker-input'
 import { PageHeader } from '@/components/page-header'
 import type { GroupMember, GroupSettlement, Transaction } from '@/types'
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
-}
+import { formatCurrency } from '@/lib/format'
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
@@ -287,7 +286,7 @@ export default function GroupDetailPage() {
   const [settleFrom, setSettleFrom] = useState('')
   const [settleTo, setSettleTo] = useState('')
   const [settleAmount, setSettleAmount] = useState('')
-  const [settleDate, setSettleDate] = useState(new Date().toISOString().split('T')[0])
+  const [settleDate, setSettleDate] = useState(localDateString)
   const [settleNotes, setSettleNotes] = useState('')
   const [settleCurrency, setSettleCurrency] = useState('USD')
   // Optional ledger integration for the payer: 'none' records the
@@ -368,7 +367,7 @@ export default function GroupDetailPage() {
     setSettleFrom(from ?? '')
     setSettleTo(to ?? '')
     setSettleAmount(amount != null ? amount.toFixed(2) : '')
-    setSettleDate(new Date().toISOString().split('T')[0])
+    setSettleDate(localDateString())
     setSettleNotes('')
     // Use the line's currency when settling a specific debt, falling
     // back to the group's default for free-form settlements. This
@@ -1007,7 +1006,7 @@ export default function GroupDetailPage() {
             <div className="space-y-2">
               <Label>{t('splitGroups.from')}</Label>
               <select
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-card"
                 value={settleFrom}
                 onChange={(e) => {
                   setSettleFrom(e.target.value)
@@ -1030,7 +1029,7 @@ export default function GroupDetailPage() {
             <div className="space-y-2">
               <Label>{t('splitGroups.to')}</Label>
               <select
-                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                className="w-full border border-border rounded-md px-3 py-2 text-sm bg-card"
                 value={settleTo}
                 onChange={(e) => setSettleTo(e.target.value)}
               >
@@ -1051,7 +1050,7 @@ export default function GroupDetailPage() {
                 <div className="space-y-2">
                   <Label>{t('splitGroups.txAction')}</Label>
                   <select
-                    className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                    className="w-full border border-border rounded-md px-3 py-2 text-sm bg-card"
                     value={settleTxMode}
                     onChange={(e) => {
                       setSettleTxMode(e.target.value as 'none' | 'create' | 'existing')
@@ -1067,14 +1066,14 @@ export default function GroupDetailPage() {
                   {settleTxMode === 'create' && (
                     <div className="space-y-1">
                       <select
-                        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-background"
+                        className="w-full border border-border rounded-md px-3 py-2 text-sm bg-card"
                         value={settleAccountId}
                         onChange={(e) => setSettleAccountId(e.target.value)}
                       >
                         <option value="">{t('splitGroups.selectAccount')}</option>
-                        {(accountsList ?? []).map((a) => (
+                        {sortAccountsByDisplayName(accountsList ?? []).map((a) => (
                           <option key={a.id} value={a.id}>
-                            {a.display_name || a.name}
+                            {getAccountName(a)}
                           </option>
                         ))}
                       </select>
@@ -1171,7 +1170,7 @@ export default function GroupDetailPage() {
             <div className="space-y-2">
               <Label>{t('splitGroups.notes')}</Label>
               <textarea
-                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-background resize-none"
+                className="w-full border border-input rounded-md px-3 py-2 text-sm bg-card resize-none"
                 rows={2}
                 value={settleNotes}
                 onChange={(e) => setSettleNotes(e.target.value)}

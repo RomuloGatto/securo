@@ -4,6 +4,7 @@ import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRegisterPageChatContext } from '@/lib/page-chat-context'
 import { assets, assetGroups, currencies as currenciesApi } from '@/lib/api'
+import { localDateString } from '@/lib/date-utils'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -39,6 +40,7 @@ import {
   Bitcoin,
   PieChart,
   AlertTriangle,
+  Upload,
 } from 'lucide-react'
 import {
   AreaChart,
@@ -49,19 +51,13 @@ import {
   ResponsiveContainer,
   CartesianGrid,
 } from 'recharts'
+import { useNavigate } from 'react-router-dom'
 import { PageHeader } from '@/components/page-header'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useCollectionFilter } from '@/contexts/collection-filter-context'
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  try {
-    return new Intl.NumberFormat(locale, { style: 'currency', currency: currency || 'USD' }).format(value)
-  } catch {
-    return new Intl.NumberFormat(locale, { style: 'currency', currency: 'USD' }).format(value)
-  }
-}
+import { formatCurrency } from '@/lib/format'
 
 // Renders a logo image when one is available, falling back to the asset's
 // type-based Lucide icon on missing URL or broken image. Uses the type's
@@ -189,6 +185,7 @@ function assetErrorMessage(e: unknown, fallback: string): string {
 
 export default function AssetsPage() {
   const { t } = useTranslation()
+  const navigate = useNavigate()
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
   const { mask } = usePrivacyMode()
@@ -1024,6 +1021,10 @@ export default function AssetsPage() {
         action={
           canWrite ? (
             <div className="flex items-center gap-2">
+              <Button onClick={() => navigate('/import?tab=investments')} variant="outline" className="gap-1.5">
+                <Upload size={16} />
+                {t('assetImport.action')}
+              </Button>
               <Button onClick={openCreateWallet} variant="outline" className="gap-1.5">
                 <Wallet size={16} />
                 {t('assets.newWallet')}
@@ -1973,7 +1974,7 @@ function AssetDetail({ assetId, currency, locale: loc, dateLocale: dateLoc, purc
   const queryClient = useQueryClient()
 
   const [valueAmount, setValueAmount] = useState('')
-  const [valueDate, setValueDate] = useState(new Date().toISOString().slice(0, 10))
+  const [valueDate, setValueDate] = useState(localDateString)
 
   const { data: values, isLoading: valuesLoading } = useQuery({
     queryKey: ['asset-values', assetId],
@@ -2296,7 +2297,7 @@ function AssetTransactionsTab({
   const [formQuantity, setFormQuantity] = useState('')
   const [formPrice, setFormPrice] = useState('')
   const [formFee, setFormFee] = useState('')
-  const [formDate, setFormDate] = useState<string>(new Date().toISOString().slice(0, 10))
+  const [formDate, setFormDate] = useState<string>(localDateString)
 
   function afterChange() {
     queryClient.refetchQueries({ queryKey: ['asset-transactions'] })
@@ -2357,7 +2358,7 @@ function AssetTransactionsTab({
     setFormQuantity('')
     setFormPrice('')
     setFormFee('')
-    setFormDate(new Date().toISOString().slice(0, 10))
+    setFormDate(localDateString())
     setDialogOpen(true)
   }
 
@@ -2381,7 +2382,7 @@ function AssetTransactionsTab({
     setFormQuantity('')
     setFormPrice('')
     setFormFee('')
-    setFormDate(new Date().toISOString().slice(0, 10))
+    setFormDate(localDateString())
     setDialogOpen(true)
   }
 
@@ -2763,7 +2764,7 @@ function AddHoldingTransactionDialog({
   const [quantity, setQuantity] = useState('')
   const [price, setPrice] = useState('')
   const [fee, setFee] = useState('')
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10))
+  const [date, setDate] = useState(localDateString)
 
   useEffect(() => {
     if (assetId) {
@@ -2771,7 +2772,7 @@ function AddHoldingTransactionDialog({
       setQuantity('')
       setPrice('')
       setFee('')
-      setDate(new Date().toISOString().slice(0, 10))
+      setDate(localDateString())
     }
   }, [assetId])
 

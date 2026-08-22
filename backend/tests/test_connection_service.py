@@ -12,6 +12,7 @@ from app.models.asset import Asset
 from app.models.bank_connection import BankConnection
 from app.models.category import Category
 from app.models.transaction import Transaction
+from app.schemas.rule import RuleAction, RuleCondition, RuleCreate
 from app.providers.base import (
     AccountData,
     BillData,
@@ -32,6 +33,7 @@ from app.services.connection_service import (
     sync_connection,
     update_connection_settings,
 )
+from app.services.rule_service import create_rule
 
 
 # ---------------------------------------------------------------------------
@@ -235,6 +237,7 @@ async def test_update_settings_new(session: AsyncSession, test_user, test_worksp
         session, conn.id, test_workspace.id, {"payee_source": "merchant"},
     )
     assert updated is not None
+    assert updated.settings is not None
     assert updated.settings["payee_source"] == "merchant"
 
 
@@ -250,6 +253,7 @@ async def test_update_settings_preserves_existing(session: AsyncSession, test_us
         session, conn.id, test_workspace.id, {"import_pending": False},
     )
     assert updated is not None
+    assert updated.settings is not None
     assert updated.settings["payee_source"] == "auto"
     assert updated.settings["import_pending"] is False
 
@@ -266,6 +270,7 @@ async def test_update_settings_sync_assets(session: AsyncSession, test_user, tes
         session, conn.id, test_workspace.id, {"sync_assets": False},
     )
     assert updated is not None
+    assert updated.settings is not None
     assert updated.settings["payee_source"] == "auto"
     assert updated.settings["import_pending"] is True
     assert updated.settings["sync_assets"] is False
@@ -301,6 +306,8 @@ async def test_oauth_callback_respects_initial_asset_sync_opt_out(
             sync_assets=False,
         )
 
+    assert connection is not None
+    assert connection.settings is not None
     assert connection.settings["sync_assets"] is False
     mock_provider.get_holdings.assert_not_awaited()
     assets = (await session.execute(select(Asset))).scalars().all()
@@ -346,6 +353,8 @@ async def test_oauth_callback_respects_state_asset_sync_opt_out(
             state="stored-state",
         )
 
+    assert connection is not None
+    assert connection.settings is not None
     assert connection.settings["sync_assets"] is False
     assert connection.settings["flow_params"] == {
         "country": "BR",
@@ -440,6 +449,7 @@ async def test_update_settings_ignores_none(session: AsyncSession, test_user, te
         session, conn.id, test_workspace.id, {"payee_source": None},
     )
     assert updated is not None
+    assert updated.settings is not None
     assert updated.settings["payee_source"] == "auto"
 
 
@@ -640,6 +650,14 @@ async def test_handle_oauth_callback_creates_connection(session: AsyncSession, t
     assert conn.institution_name == "Test Bank"
     assert conn.external_id == "ext-oauth-1"
     assert conn.status == "active"
+    transaction = (
+        await session.execute(
+            select(Transaction).where(Transaction.external_id == "tx-1")
+        )
+    ).scalar_one()
+    assert transaction.description == "UBER"
+    assert transaction.original_description == "UBER"
+    assert transaction.description_is_rule_managed is False
 
 
 @pytest.mark.asyncio
@@ -704,6 +722,77 @@ async def test_sync_connection_new_transactions(session: AsyncSession, test_user
 
     assert result_conn.status == "active"
     assert merged == 0
+    transaction = await session.scalar(
+        select(Transaction).where(Transaction.external_id == "sync-tx-1")
+    )
+    assert transaction is not None
+    assert transaction.original_description == "GROCERY"
+
+
+@pytest.mark.asyncio
+async def test_sync_connection_tolerates_duplicate_transaction_rows(
+    session: AsyncSession, test_user, test_workspace
+):
+    """A pre-existing (account_id, external_id) duplicate — the state an earlier
+    concurrent-sync race leaves behind — must not abort the sync. Regression for
+    the MultipleResultsFound crash at the transaction dedup lookup.
+    """
+    conn = await _make_connection(session, test_user.id, "Dup Bank")
+
+    account = Account(
+        id=uuid.uuid4(), user_id=test_user.id, connection_id=conn.id,
+        external_id="dup-acc-1", name="Checking", type="checking",
+        balance=Decimal("500"), currency="BRL",
+    )
+    session.add(account)
+    await session.flush()
+    account_id = account.id  # capture before sync commits/expires the ORM object
+
+    # Two rows sharing (account_id, external_id): exactly what a sync race
+    # leaves behind, and what scalar_one_or_none() used to choke on.
+    for _ in range(2):
+        session.add(Transaction(
+            id=uuid.uuid4(), user_id=test_user.id, account_id=account_id,
+            external_id="dup-tx-1", description="SPOTIFY", amount=Decimal("23.90"),
+            date=date.today(), type="debit", status="pending", source="sync",
+            created_at=datetime.now(timezone.utc),
+        ))
+    await session.commit()
+
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(return_value=[
+        AccountData(
+            external_id="dup-acc-1", name="Checking",
+            type="checking", balance=Decimal("500"), currency="BRL",
+        ),
+    ])
+    mock_provider.get_transactions = AsyncMock(return_value=[
+        TransactionData(
+            external_id="dup-tx-1", description="SPOTIFY",
+            amount=Decimal("23.90"), date=date.today(), type="debit",
+            currency="BRL", status="posted",
+        ),
+    ])
+
+    with patch("app.services.connection_service.get_provider", return_value=mock_provider), \
+         patch("app.services.connection_service.detect_transfer_pairs", new_callable=AsyncMock), \
+         patch("app.services.connection_service.stamp_primary_amount", new_callable=AsyncMock), \
+         patch("app.services.connection_service._cleanup_phantom_duplicates", new_callable=AsyncMock), \
+         patch("app.services.connection_service.apply_rules_to_transaction", new_callable=AsyncMock):
+        result_conn, _ = await sync_connection(session, conn.id, test_workspace.id, test_user.id)
+
+    assert result_conn.status == "active"
+    # Sync reconciled onto an existing row instead of inserting a third, and did
+    # not raise. The incoming "posted" status is applied to one of the twins.
+    rows = (await session.execute(
+        select(Transaction).where(
+            Transaction.account_id == account_id,
+            Transaction.external_id == "dup-tx-1",
+        )
+    )).scalars().all()
+    assert len(rows) == 2
+    assert any(r.status == "posted" for r in rows)
 
 
 @pytest.mark.asyncio
@@ -742,6 +831,87 @@ async def test_sync_connection_with_category_mapping(session: AsyncSession, test
 
 
 @pytest.mark.asyncio
+async def test_sync_keeps_provider_category_while_normalizing_description(
+    session: AsyncSession, test_user, test_workspace
+):
+    conn = await _make_connection(session, test_user.id, "Normalized Cat Bank")
+    category = await _make_category(session, test_user.id, "Alimentação")
+    await create_rule(
+        session,
+        test_workspace.id,
+        test_user.id,
+        RuleCreate(
+            name="Normalize iFood sync",
+            conditions=[
+                RuleCondition(field="payee", op="contains", value="IFOOD.COM")
+            ],
+            actions=[
+                RuleAction(op="set_description", value="iFood"),
+                RuleAction(op="append_notes", value="#delivery"),
+            ],
+            apply_to_existing=False,
+        ),
+    )
+    mock_provider = AsyncMock()
+    mock_provider.refresh_credentials = AsyncMock(return_value={"token": "t"})
+    mock_provider.get_accounts = AsyncMock(
+        return_value=[
+            AccountData(
+                external_id="norm-acc-1",
+                name="Checking",
+                type="checking",
+                balance=Decimal("100"),
+                currency="BRL",
+            )
+        ]
+    )
+    mock_provider.get_transactions = AsyncMock(
+        return_value=[
+            TransactionData(
+                external_id="norm-tx-1",
+                description="|fd*f|ood Club",
+                payee="IFOOD.COM AGÊNCIA DE RESTAURANTES ONLINE S.A.",
+                amount=Decimal("50"),
+                date=date.today(),
+                type="debit",
+                currency="BRL",
+                pluggy_category="Eating out",
+                raw_data={"merchant": {"name": "IFOOD.COM"}},
+            )
+        ]
+    )
+
+    with patch(
+        "app.services.connection_service.get_provider",
+        return_value=mock_provider,
+    ), patch(
+        "app.services.connection_service.detect_transfer_pairs",
+        new_callable=AsyncMock,
+    ), patch(
+        "app.services.connection_service.stamp_primary_amount",
+        new_callable=AsyncMock,
+    ):
+        await sync_connection(
+            session, conn.id, test_workspace.id, test_user.id
+        )
+
+    transaction = (
+        await session.execute(
+            select(Transaction).where(
+                Transaction.external_id == "norm-tx-1"
+            )
+        )
+    ).scalar_one()
+    assert transaction.category_id == category.id
+    assert transaction.description == "iFood"
+    assert transaction.original_description == "|fd*f|ood Club"
+    assert transaction.description_is_rule_managed is True
+    assert transaction.payee == "IFOOD.COM AGÊNCIA DE RESTAURANTES ONLINE S.A."
+    assert transaction.payee_id is not None
+    assert transaction.raw_data == {"merchant": {"name": "IFOOD.COM"}}
+    assert transaction.notes == "#delivery"
+
+@pytest.mark.asyncio
 async def test_sync_connection_error_raises(session: AsyncSession, test_user, test_workspace):
     conn = await _make_connection(session, test_user.id, "Error Bank")
     mock_provider = AsyncMock()
@@ -772,6 +942,7 @@ async def test_sync_connection_user_action_marks_error(
             await sync_connection(session, conn.id, test_workspace.id, test_user.id)
 
     refreshed = await session.get(BankConnection, conn.id)
+    assert refreshed is not None
     assert refreshed.status == "error"
 
 
@@ -1544,6 +1715,7 @@ async def test_sync_creates_synthetic_transactions_for_finance_charges(
         assert r.date == date(2026, 4, 15)
         assert r.effective_date == date(2026, 4, 15)
         assert r.type == "debit"
+        assert r.external_id is not None
         assert r.external_id.startswith("bill_charge:bill-fc-1:")
 
 
@@ -1765,6 +1937,7 @@ async def test_sync_removes_orphaned_finance_charges_on_resync(
         )
     )).scalars().all()
     assert len(rows) == 1
+    assert rows[0].external_id is not None
     assert "fc-keep" in rows[0].external_id
 
 

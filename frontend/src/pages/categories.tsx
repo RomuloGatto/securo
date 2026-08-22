@@ -1,9 +1,12 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import axios from 'axios'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { categories as categoriesApi, categoryGroups as groupsApi } from '@/lib/api'
+import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -54,6 +57,8 @@ export default function CategoriesPage() {
   const [groupFormIcon, setGroupFormIcon] = useState('folder')
   const [groupFormColor, setGroupFormColor] = useState('#6B7280')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+  const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
+  const [deletingGroup, setDeletingGroup] = useState<CategoryGroup | null>(null)
 
   const { data: groups } = useQuery({
     queryKey: ['category-groups'],
@@ -80,7 +85,15 @@ export default function CategoriesPage() {
   })
   const deleteCatMutation = useMutation({
     mutationFn: (id: string) => categoriesApi.delete(id),
-    onSuccess: () => { invalidateAll(); toast.success(t('categories.deleted')) },
+    onSuccess: () => { invalidateAll(); setDeletingCategory(null); toast.success(t('categories.deleted')) },
+    onError: (err: unknown) => {
+      // The API answers 409 with an English sentence; show the translated one instead.
+      if (axios.isAxiosError(err) && err.response?.status === 409) {
+        toast.error(t('categories.deleteInUse'))
+        return
+      }
+      toast.error(extractApiError(err, t('common.error')))
+    },
   })
 
   const createGroupMutation = useMutation({
@@ -94,7 +107,10 @@ export default function CategoriesPage() {
   })
   const deleteGroupMutation = useMutation({
     mutationFn: (id: string) => groupsApi.delete(id),
-    onSuccess: () => { invalidateAll(); toast.success(t('groups.deleted')) },
+    onSuccess: () => { invalidateAll(); setDeletingGroup(null); toast.success(t('groups.deleted')) },
+    onError: (err: unknown) => {
+      toast.error(extractApiError(err, t('common.error')))
+    },
   })
 
   const toggleCollapse = (groupId: string) => {
@@ -161,7 +177,7 @@ export default function CategoriesPage() {
           {!cat.is_system && (
             <button
               className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-              onClick={() => deleteCatMutation.mutate(cat.id)}
+              onClick={() => setDeletingCategory(cat)}
               disabled={deleteCatMutation.isPending}
               title={t('common.delete')}
             >
@@ -237,7 +253,7 @@ export default function CategoriesPage() {
                       {!group.is_system && (
                         <button
                           className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                          onClick={() => deleteGroupMutation.mutate(group.id)}
+                          onClick={() => setDeletingGroup(group)}
                           disabled={deleteGroupMutation.isPending}
                           title={t('common.delete')}
                         >
@@ -264,7 +280,7 @@ export default function CategoriesPage() {
 
       {/* Category Dialog */}
       <Dialog open={catDialogOpen} onOpenChange={() => { setCatDialogOpen(false); setEditingCat(null) }}>
-        <DialogContent>
+        <DialogContent className="flex max-h-[calc(100dvh-2rem)] flex-col overflow-hidden">
           <DialogHeader>
             <DialogTitle>{editingCat ? t('categories.editCategory') : t('categories.newCategory')}</DialogTitle>
           </DialogHeader>
@@ -287,61 +303,63 @@ export default function CategoriesPage() {
                 createCatMutation.mutate(data)
               }
             }}
-            className="space-y-4"
+            className="flex min-h-0 flex-1 flex-col"
           >
-            <div className="space-y-2">
-              <Label>{t('groups.name')}</Label>
-              <Input name="name" defaultValue={editingCat?.name ?? ''} required />
+            <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-3">
+              <div className="space-y-2">
+                <Label>{t('groups.name')}</Label>
+                <Input name="name" defaultValue={editingCat?.name ?? ''} required />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('categories.group')}</Label>
+                <select
+                  name="group_id"
+                  defaultValue={editingCat?.group_id ?? ''}
+                  className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                >
+                  <option value="">{t('categories.noGroup')}</option>
+                  {groups?.map((g) => (
+                    <option key={g.id} value={g.id}>{g.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label>{t('groups.color')}</Label>
+                <Input name="color" type="color" value={formColor} onChange={(e) => setFormColor(e.target.value)} required className="h-9 px-2 py-1" />
+              </div>
+              <div className="space-y-2">
+                <Label>{t('groups.icon')}</Label>
+                <IconPicker value={formIcon} color={formColor} onChange={setFormIcon} />
+                <input type="hidden" name="icon" value={formIcon} />
+              </div>
+              <div className="pt-2 border-t border-border">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formTreatAsTransfer}
+                    onChange={(e) => setFormTreatAsTransfer(e.target.checked)}
+                    className="h-4 w-4 mt-0.5 rounded border-border shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-foreground">{t('categories.treatAsTransfer')}</span>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t('categories.treatAsTransferDesc')}</p>
+                  </div>
+                </label>
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={formIgnoreTransfer}
+                    onChange={(e) => setFormIgnoreTransfer(e.target.checked)}
+                    className="h-4 w-4 mt-0.5 rounded border-border shrink-0"
+                  />
+                  <div className="flex-1 min-w-0">
+                    <span className="text-sm font-medium text-foreground">{t('categories.ignoreTransfer')}</span>
+                    <p className="text-xs text-muted-foreground mt-0.5">{t('categories.ignoreTransferDesc')}</p>
+                  </div>
+                </label>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>{t('categories.group')}</Label>
-              <select
-                name="group_id"
-                defaultValue={editingCat?.group_id ?? ''}
-                className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-card text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-              >
-                <option value="">{t('categories.noGroup')}</option>
-                {groups?.map((g) => (
-                  <option key={g.id} value={g.id}>{g.name}</option>
-                ))}
-              </select>
-            </div>
-            <div className="space-y-2">
-              <Label>{t('groups.color')}</Label>
-              <Input name="color" type="color" value={formColor} onChange={(e) => setFormColor(e.target.value)} required className="h-9 px-2 py-1" />
-            </div>
-            <div className="space-y-2">
-              <Label>{t('groups.icon')}</Label>
-              <IconPicker value={formIcon} color={formColor} onChange={setFormIcon} />
-              <input type="hidden" name="icon" value={formIcon} />
-            </div>
-            <div className="pt-2 border-t border-border">
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formTreatAsTransfer}
-                  onChange={(e) => setFormTreatAsTransfer(e.target.checked)}
-                  className="h-4 w-4 mt-0.5 rounded border-border shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-foreground">{t('categories.treatAsTransfer')}</span>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t('categories.treatAsTransferDesc')}</p>
-                </div>
-              </label>
-              <label className="flex items-start gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={formIgnoreTransfer}
-                  onChange={(e) => setFormIgnoreTransfer(e.target.checked)}
-                  className="h-4 w-4 mt-0.5 rounded border-border shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium text-foreground">{t('categories.ignoreTransfer')}</span>
-                  <p className="text-xs text-muted-foreground mt-0.5">{t('categories.ignoreTransferDesc')}</p>
-                </div>
-              </label>
-            </div>
-            <DialogFooter>
+            <DialogFooter className="mt-2 shrink-0 border-t pt-4">
               <Button type="button" variant="outline" onClick={() => { setCatDialogOpen(false); setEditingCat(null) }}>
                 {t('common.cancel')}
               </Button>
@@ -402,6 +420,24 @@ export default function CategoriesPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <DeleteConfirmationDialog
+        open={!!deletingCategory}
+        title={t('categories.confirmDeleteTitle')}
+        description={t('categories.confirmDeleteDescription', { name: deletingCategory?.name })}
+        isPending={deleteCatMutation.isPending}
+        onClose={() => setDeletingCategory(null)}
+        onConfirm={() => deletingCategory && deleteCatMutation.mutate(deletingCategory.id)}
+      />
+
+      <DeleteConfirmationDialog
+        open={!!deletingGroup}
+        title={t('groups.confirmDeleteTitle')}
+        description={t('groups.confirmDeleteDescription', { name: deletingGroup?.name })}
+        isPending={deleteGroupMutation.isPending}
+        onClose={() => setDeletingGroup(null)}
+        onConfirm={() => deletingGroup && deleteGroupMutation.mutate(deletingGroup.id)}
+      />
     </div>
   )
 }

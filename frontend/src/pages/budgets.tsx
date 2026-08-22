@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
+import { useDisplayLocale } from '@/hooks/use-display-locale'
+import { monthLabel } from '@/lib/month-utils'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { categories as categoriesApi, categoryGroups as groupsApi, budgets as budgetsApi } from '@/lib/api'
+import { extractApiError } from '@/lib/api-errors'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
+import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -25,10 +28,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
-
-function formatCurrency(value: number, currency = 'USD', locale = 'en-US') {
-  return new Intl.NumberFormat(locale, { style: 'currency', currency }).format(value)
-}
+import { formatCurrency } from '@/lib/format'
 
 function currentMonth() {
   const now = new Date()
@@ -60,7 +60,6 @@ export default function BudgetsPage() {
   const { canWrite } = useWorkspace()
   const userCurrency = user?.preferences?.currency_display ?? 'USD'
   const locale = useDisplayLocale()
-  const dateLocale = useDateLocale()
   const queryClient = useQueryClient()
   const [selectedMonth, setSelectedMonth] = useState(currentMonth)
   const [monthCalOpen, setMonthCalOpen] = useState(false)
@@ -68,6 +67,7 @@ export default function BudgetsPage() {
   const monthParam = `${selectedMonth}-01`
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<Budget | null>(null)
+  const [deletingBudget, setDeletingBudget] = useState<Budget | null>(null)
 
   const { data: budgetsList } = useQuery({
     queryKey: ['budgets', selectedMonth],
@@ -111,7 +111,11 @@ export default function BudgetsPage() {
     mutationFn: (id: string) => budgetsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['budgets'] })
+      setDeletingBudget(null)
       toast.success(t('budgets.deleted'))
+    },
+    onError: (err: unknown) => {
+      toast.error(extractApiError(err, t('common.error')))
     },
   })
 
@@ -126,7 +130,8 @@ export default function BudgetsPage() {
     )
   }
 
-  const monthTitle = new Date(selectedMonth + '-02').toLocaleDateString(dateLocale, { month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())
+  const uiLocale = i18n.resolvedLanguage ?? i18n.language
+  const monthTitle = monthLabel(selectedMonth, uiLocale).replace(/^\w/, c => c.toUpperCase())
 
   return (
     <div>
@@ -217,14 +222,16 @@ export default function BudgetsPage() {
                         <button
                           className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
                           onClick={() => { setEditing(budget); setDialogOpen(true) }}
+                          aria-label={t('common.edit')}
                           title={t('common.edit')}
                         >
                           <Pencil size={13} />
                         </button>
                         <button
                           className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                          onClick={() => deleteMutation.mutate(budget.id)}
+                          onClick={() => setDeletingBudget(budget)}
                           disabled={deleteMutation.isPending}
+                          aria-label={t('common.delete')}
                           title={t('common.delete')}
                         >
                           <Trash2 size={13} />
@@ -317,6 +324,22 @@ export default function BudgetsPage() {
           </form>
         </DialogContent>
       </Dialog>
+
+      <DeleteConfirmationDialog
+        open={!!deletingBudget}
+        title={t('budgets.confirmDeleteTitle')}
+        description={t(
+          deletingBudget?.is_recurring
+            ? 'budgets.confirmDeleteRecurringDescription'
+            : 'budgets.confirmDeleteDescription',
+          {
+            name: categoriesList?.find((category) => category.id === deletingBudget?.category_id)?.name ?? t('budgets.category'),
+          },
+        )}
+        isPending={deleteMutation.isPending}
+        onClose={() => setDeletingBudget(null)}
+        onConfirm={() => deletingBudget && deleteMutation.mutate(deletingBudget.id)}
+      />
     </div>
   )
 }

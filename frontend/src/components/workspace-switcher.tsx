@@ -46,7 +46,12 @@ import {
   Fingerprint,
 } from 'lucide-react'
 import { CategoryIcon } from '@/components/category-icon'
-import type { Workspace } from '@/types'
+import {
+  WORKSPACE_KINDS,
+  WORKSPACE_KIND_ICON,
+  WORKSPACE_KIND_LABEL_KEY,
+} from '@/lib/workspace-kinds'
+import type { Workspace, WorkspaceKind } from '@/types'
 
 const ROLE_LABEL_KEY: Record<string, string> = {
   owner: 'workspace.roleOwner',
@@ -55,17 +60,11 @@ const ROLE_LABEL_KEY: Record<string, string> = {
   manager: 'workspace.roleManager',
 }
 
-// Fallbacks when a workspace hasn't set its own icon/color yet.
-const DEFAULT_ICON_BY_KIND: Record<string, string> = {
-  personal: 'user',
-  freelancer: 'briefcase',
-  small_business: 'building-2',
-  accountant_firm: 'landmark',
-}
+// Fallback when a workspace hasn't set its own color yet.
 const DEFAULT_COLOR = '#6366F1'
 
 function workspaceIcon(w: Workspace): string {
-  return w.icon || DEFAULT_ICON_BY_KIND[w.kind] || 'briefcase'
+  return w.icon || WORKSPACE_KIND_ICON[w.kind as WorkspaceKind] || 'briefcase'
 }
 function workspaceColor(w: Workspace): string {
   return w.color || DEFAULT_COLOR
@@ -78,6 +77,8 @@ interface AccountMenuProps {
   onTwoFactor: () => void
   /** Open the passkey management dialog. */
   onPasskeys: () => void
+  /** Trigger a backup download. */
+  onBackup: () => void
   /** Open the "Update available" dialog. */
   onUpdateAvailable: () => void
   /** True when the AGENTS_ENABLED env flag is on. */
@@ -97,6 +98,7 @@ export function WorkspaceSwitcher({
   onChangePassword,
   onTwoFactor,
   onPasskeys,
+  onBackup,
   onUpdateAvailable,
   agentsEnabled,
 }: AccountMenuProps) {
@@ -106,6 +108,7 @@ export function WorkspaceSwitcher({
   const { user, logout } = useAuth()
   const [createOpen, setCreateOpen] = useState(false)
   const [newName, setNewName] = useState('')
+  const [newKind, setNewKind] = useState<WorkspaceKind>('personal')
 
   const currentLang = resolveSupportedLang(i18n.resolvedLanguage ?? i18n.language)
 
@@ -113,6 +116,7 @@ export function WorkspaceSwitcher({
     mutationFn: () =>
       workspacesApi.create({
         name: newName.trim(),
+        kind: newKind,
         self_membership: true,
         locale: currentLang,
       }),
@@ -122,6 +126,7 @@ export function WorkspaceSwitcher({
       await switchWorkspace(ws.id)
       setCreateOpen(false)
       setNewName('')
+      setNewKind('personal')
       navigate('/workspace/settings')
     },
     onError: (e: unknown) => {
@@ -247,11 +252,11 @@ export function WorkspaceSwitcher({
             {t('auth.passkeysTitle')}
           </DropdownMenuItem>
           <DropdownMenuItem
-            onClick={() => navigate('/backups')}
+            onClick={onBackup}
             className="flex items-center gap-2"
           >
             <HardDriveDownload size={14} />
-            {t('backup.menu')}
+            {t('backup.button')}
           </DropdownMenuItem>
 
           {agentsEnabled && (
@@ -311,8 +316,15 @@ export function WorkspaceSwitcher({
                   onClick={() => i18n.changeLanguage('pt-BR')}
                   className="flex items-center gap-2"
                 >
-                  <span className="flex-1">Português</span>
+                  <span className="flex-1">Português (BR)</span>
                   {currentLang === 'pt-BR' && <Check size={13} className="text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => i18n.changeLanguage('pt-PT')}
+                  className="flex items-center gap-2"
+                >
+                  <span className="flex-1">Português (PT)</span>
+                  {currentLang === 'pt-PT' && <Check size={13} className="text-primary" />}
                 </DropdownMenuItem>
                 <DropdownMenuItem
                   onClick={() => i18n.changeLanguage('en')}
@@ -341,6 +353,13 @@ export function WorkspaceSwitcher({
                 >
                   <span className="flex-1">Italiano</span>
                   {currentLang === 'it' && <Check size={13} className="text-primary" />}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => i18n.changeLanguage('fr')}
+                  className="flex items-center gap-2"
+                >
+                  <span className="flex-1">Français</span>
+                  {currentLang === 'fr' && <Check size={13} className="text-primary" />}
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
             </DropdownMenuPortal>
@@ -384,6 +403,43 @@ export function WorkspaceSwitcher({
                 autoFocus
                 maxLength={100}
               />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-[13px]">{t('workspace.kind', 'Type')}</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {WORKSPACE_KINDS.map((kind) => {
+                  const isSelected = kind === newKind
+                  return (
+                    <button
+                      key={kind}
+                      type="button"
+                      onClick={() => setNewKind(kind)}
+                      aria-pressed={isSelected}
+                      className={`flex items-center gap-2.5 rounded-lg border p-3 text-left transition-colors ${
+                        isSelected
+                          ? 'border-primary bg-primary/5'
+                          : 'border-input hover:bg-muted/40'
+                      }`}
+                    >
+                      <CategoryIcon
+                        icon={WORKSPACE_KIND_ICON[kind]}
+                        color={isSelected ? DEFAULT_COLOR : '#94A3B8'}
+                        size="sm"
+                        className="shrink-0"
+                      />
+                      <span className="text-[13px] font-medium leading-tight">
+                        {t(WORKSPACE_KIND_LABEL_KEY[kind])}
+                      </span>
+                    </button>
+                  )
+                })}
+              </div>
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {t(
+                  'workspace.kindHint',
+                  "Pick what this workspace tracks. This can't be changed later.",
+                )}
+              </p>
             </div>
           </div>
           <DialogFooter className="mt-2">

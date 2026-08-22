@@ -11,6 +11,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+import pyzipper
 from fastapi import HTTPException, status
 from sqlalchemy import Date, DateTime, Numeric, delete, insert, select, update
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
@@ -55,6 +56,28 @@ BACKUP_PREFIX = "securo-backup"
 CONFIG_KEY_PREFIX = "backup:"
 CONFIG_KEY_SUFFIX = ":config"
 BACKUP_STORAGE_PATH = Path("/app/data/backups")
+_COMPRESSION = zipfile.ZIP_DEFLATED
+
+
+def build_backup_archive(files: dict[str, object], password: str | None = None) -> bytes:
+    """Pack JSON payloads into a plain or AES-256 encrypted ZIP archive."""
+    buffer = io.BytesIO()
+    if password:
+        archive = pyzipper.AESZipFile(
+            buffer,
+            "w",
+            compression=_COMPRESSION,
+            encryption=pyzipper.WZ_AES,
+        )
+        archive.setpassword(password.encode("utf-8"))
+    else:
+        archive = zipfile.ZipFile(buffer, "w", _COMPRESSION)
+
+    with archive as output:
+        for name, payload in files.items():
+            output.writestr(name, json.dumps(payload, indent=2, ensure_ascii=False))
+
+    return buffer.getvalue()
 
 
 @dataclass(frozen=True)
@@ -355,7 +378,11 @@ async def _fetch_entity_rows(
         ]
     spec = MODEL_SPECS[name]
     model = spec.model
-    result = await session.execute(select(model).where(model.workspace_id == workspace_id))
+    assert model is not None
+    dynamic_model: Any = model
+    result = await session.execute(
+        select(dynamic_model).where(dynamic_model.workspace_id == workspace_id)
+    )
     return [_serialize_model(row) for row in result.scalars().all()]
 
 
@@ -579,7 +606,7 @@ def _build_id_map(
 
 
 def _prepare_model_data(
-    model: type,
+    model: Any,
     row: dict[str, Any],
     *,
     id_map: dict[str, str],
@@ -688,7 +715,11 @@ async def _clear_workspace_entities(
             await session.execute(delete(AssetValue).where(AssetValue.asset_id.in_(asset_ids)))
             continue
         model = MODEL_SPECS[name].model
-        await session.execute(delete(model).where(model.workspace_id == workspace_id))
+        assert model is not None
+        dynamic_model: Any = model
+        await session.execute(
+            delete(dynamic_model).where(dynamic_model.workspace_id == workspace_id)
+        )
 
 
 async def _insert_associations(
