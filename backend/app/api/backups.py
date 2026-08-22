@@ -53,7 +53,7 @@ async def list_backups(
 @router.post("/run", response_model=BackupItem)
 async def run_backup(
     body: BackupRunRequest | None = None,
-    ctx: WorkspaceContext = Depends(current_workspace),
+    ctx: WorkspaceContext = Depends(current_writable_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
     return await backup_service.create_stored_backup(

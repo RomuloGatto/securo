@@ -30,6 +30,27 @@ async def test_backup_preview_upload_requires_auth(client: AsyncClient):
 
 
 @pytest.mark.asyncio
+async def test_viewer_can_preview_backup_upload(client: AsyncClient, viewer_auth_headers):
+    response = await client.post(
+        "/api/backups/preview-upload",
+        headers=viewer_auth_headers,
+        files={"file": ("backup.zip", b"not-a-zip", "application/zip")},
+    )
+    assert response.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_viewer_cannot_run_stored_backup(client: AsyncClient, viewer_auth_headers):
+    response = await client.post(
+        "/api/backups/run",
+        headers=viewer_auth_headers,
+        json={"content": "both"},
+    )
+    assert response.status_code == 403
+    assert "read-only" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
 async def test_backup_config_roundtrip(client: AsyncClient, auth_headers, backup_dir):
     default_resp = await client.get("/api/backups/config", headers=auth_headers)
     assert default_resp.status_code == 200
