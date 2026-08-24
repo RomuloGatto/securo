@@ -28,7 +28,7 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { resolveDateFnsLocale } from '@/lib/date-fns-locale'
-import { findBudgetCategoryDisplay } from '@/lib/category-reference-utils'
+import { findCategoryReference } from '@/lib/category-reference-utils'
 import { formatCurrency } from '@/lib/format'
 
 function currentMonth() {
@@ -75,14 +75,16 @@ export default function BudgetsPage() {
     queryFn: () => budgetsApi.list(monthParam),
   })
 
-  const { data: budgetComparison } = useQuery({
-    queryKey: ['budgets', 'comparison', selectedMonth],
-    queryFn: () => budgetsApi.comparison(monthParam),
-  })
-
   const { data: categoriesList } = useQuery({
     queryKey: ['categories'],
     queryFn: categoriesApi.list,
+  })
+
+  // Budgets can point at a hidden default category. The picker below only
+  // offers visible ones, but existing rows still have to name what they budget.
+  const { data: allCategoriesList } = useQuery({
+    queryKey: ['categories', 'management'],
+    queryFn: categoriesApi.listIncludingHidden,
   })
 
   const { data: groupsList } = useQuery({
@@ -125,13 +127,15 @@ export default function BudgetsPage() {
     },
   })
 
+  const displayCategories = allCategoriesList ?? categoriesList ?? []
+
   const getCategoryDisplay = (categoryId: string) => {
-    const category = findBudgetCategoryDisplay(budgetComparison ?? [], categoryId)
+    const category = findCategoryReference(displayCategories, categoryId)
     if (!category) return <span>{categoryId}</span>
     return (
       <span className="flex items-center gap-2">
-        <CategoryIcon icon={category.category_icon} color={category.category_color} size="sm" />
-        <span>{category.category_name}</span>
+        <CategoryIcon icon={category.icon} color={category.color} size="sm" />
+        <span>{category.name}</span>
       </span>
     )
   }
@@ -339,7 +343,8 @@ export default function BudgetsPage() {
             ? 'budgets.confirmDeleteRecurringDescription'
             : 'budgets.confirmDeleteDescription',
           {
-            name: categoriesList?.find((category) => category.id === deletingBudget?.category_id)?.name ?? t('budgets.category'),
+            name: findCategoryReference(displayCategories, deletingBudget?.category_id ?? '')?.name
+              ?? t('budgets.category'),
           },
         )}
         isPending={deleteMutation.isPending}

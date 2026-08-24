@@ -9,7 +9,6 @@ describe('invalidateCategoryQueries', () => {
     const keys = [
       ['categories'],
       ['categories', 'management'],
-      ['budgets', 'comparison', '2026-08'],
       ['categoryGroups'],
       ['categoryGroups', 'management'],
       ['category-groups'],

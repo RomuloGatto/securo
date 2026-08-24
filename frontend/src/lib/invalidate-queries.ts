@@ -10,8 +10,6 @@ import type { QueryClient } from '@tanstack/react-query'
 // on top of this call.
 export function invalidateCategoryQueries(queryClient: QueryClient) {
   queryClient.invalidateQueries({ queryKey: ['categories'] })
-  // Budget rows render embedded category metadata from the comparison query.
-  queryClient.invalidateQueries({ queryKey: ['budgets'] })
   // Both key families are currently used across the frontend. Invalidate both
   // until callers have been migrated to a single convention.
   queryClient.invalidateQueries({ queryKey: ['categoryGroups'] })
