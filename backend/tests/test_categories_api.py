@@ -283,3 +283,132 @@ async def test_cannot_hide_user_category(client: AsyncClient, auth_headers):
 async def test_categories_unauthenticated(client: AsyncClient, clean_db):
     response = await client.get("/api/categories")
     assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_hidden_category_is_not_assigned_by_rules(
+    client: AsyncClient, auth_headers, test_categories: list[Category], test_account
+):
+    """A category the user retired must not come back through a rule."""
+    cat_id = str(test_categories[0].id)
+    rule_response = await client.post(
+        "/api/rules",
+        headers=auth_headers,
+        json={
+            "name": "Delivery",
+            "conditions_op": "or",
+            "conditions": [
+                {"field": "description", "op": "contains", "value": "IFOOD"}
+            ],
+            "actions": [{"op": "set_category", "value": cat_id}],
+            "priority": 0,
+        },
+    )
+    assert rule_response.status_code == 201
+
+    payload = {
+        "account_id": str(test_account.id),
+        "description": "IFOOD PEDIDO",
+        "amount": -42.0,
+        "date": "2026-08-24",
+        "type": "expense",
+    }
+
+    matched = await client.post("/api/transactions", headers=auth_headers, json=payload)
+    assert matched.status_code == 201
+    assert matched.json()["category_id"] == cat_id
+
+    hide = await client.patch(
+        f"/api/categories/{cat_id}", headers=auth_headers, json={"is_hidden": True}
+    )
+    assert hide.status_code == 200
+
+    after_hiding = await client.post(
+        "/api/transactions", headers=auth_headers, json=payload
+    )
+    assert after_hiding.status_code == 201
+    assert after_hiding.json()["category_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_rule_usage_lists_rules_assigning_the_category(
+    client: AsyncClient, auth_headers, test_categories: list[Category]
+):
+    cat_id = str(test_categories[0].id)
+    other_id = str(test_categories[1].id)
+
+    for name, target in [("Food rule", cat_id), ("Transport rule", other_id)]:
+        response = await client.post(
+            "/api/rules",
+            headers=auth_headers,
+            json={
+                "name": name,
+                "conditions_op": "or",
+                "conditions": [
+                    {"field": "description", "op": "contains", "value": name}
+                ],
+                "actions": [{"op": "set_category", "value": target}],
+                "priority": 0,
+            },
+        )
+        assert response.status_code == 201
+
+    usage = await client.get(
+        f"/api/categories/{cat_id}/rule-usage", headers=auth_headers
+    )
+    assert usage.status_code == 200
+    assert [rule["name"] for rule in usage.json()["rules"]] == ["Food rule"]
+
+
+@pytest.mark.asyncio
+async def test_hiding_can_deactivate_the_rules_that_assign_the_category(
+    client: AsyncClient, auth_headers, test_categories: list[Category]
+):
+    cat_id = str(test_categories[0].id)
+    create = await client.post(
+        "/api/rules",
+        headers=auth_headers,
+        json={
+            "name": "Food rule",
+            "conditions_op": "or",
+            "conditions": [{"field": "description", "op": "contains", "value": "IFOOD"}],
+            "actions": [{"op": "set_category", "value": cat_id}],
+            "priority": 0,
+        },
+    )
+    assert create.status_code == 201
+    rule_id = create.json()["id"]
+
+    hide = await client.patch(
+        f"/api/categories/{cat_id}?deactivate_rules=true",
+        headers=auth_headers,
+        json={"is_hidden": True},
+    )
+    assert hide.status_code == 200
+
+    rules = await client.get("/api/rules", headers=auth_headers)
+    rule = next(item for item in rules.json() if item["id"] == rule_id)
+    assert rule["is_active"] is False
+
+    # Hiding without the flag leaves rules alone.
+    other_id = str(test_categories[1].id)
+    create_other = await client.post(
+        "/api/rules",
+        headers=auth_headers,
+        json={
+            "name": "Transport rule",
+            "conditions_op": "or",
+            "conditions": [{"field": "description", "op": "contains", "value": "UBER"}],
+            "actions": [{"op": "set_category", "value": other_id}],
+            "priority": 0,
+        },
+    )
+    assert create_other.status_code == 201
+    await client.patch(
+        f"/api/categories/{other_id}", headers=auth_headers, json={"is_hidden": True}
+    )
+    rules = await client.get("/api/rules", headers=auth_headers)
+    untouched = next(
+        item for item in rules.json() if item["id"] == create_other.json()["id"]
+    )
+    assert untouched["is_active"] is True

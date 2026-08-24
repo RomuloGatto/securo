@@ -958,10 +958,14 @@
     "ignoreTransfer": "Ignorer ce virement",
     "ignoreTransferDesc": "Les transactions ignorées n'apparaîtront pas dans les rapports de revenus ou de dépenses.",
     "ignoreTransferBadge": "Ignorer",
-    "hiddenScopeDescription": "Les catégories par défaut masquées sont retirées des sélecteurs. Les transactions, budgets, tableaux de bord et rapports existants continuent de les utiliser.",
+    "hiddenScopeDescription": "Les catégories par défaut masquées sont retirées des sélecteurs et ne sont plus attribuées par les règles. Les transactions, budgets, tableaux de bord et rapports existants continuent de les utiliser.",
     "hiddenBadge": "Masquée",
     "showDefault": "Afficher la catégorie par défaut",
-    "hideDefault": "Masquer la catégorie par défaut"
+    "hideDefault": "Masquer la catégorie par défaut",
+    "hideWithRulesTitle": "Masquer {{name}} ?",
+    "hideWithRulesDescription": "{{count}} règles actives attribuent cette catégorie. La masquer les empêche déjà de catégoriser de nouvelles transactions, mais elles restent affichées comme actives tant que vous ne les désactivez pas.",
+    "hideKeepRules": "Masquer seulement",
+    "hideAndTurnOffRules": "Masquer et désactiver les règles"
   },
   "groups": {
     "title": "Groupes de catégories",

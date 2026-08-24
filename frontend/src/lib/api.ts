@@ -8,6 +8,7 @@ import type {
   PasskeyOptionsResponse,
   AppSetting,
   Category,
+  CategoryRuleUsage,
   CategoryGroup,
   BankConnection,
   ConnectionSettings,
@@ -281,8 +282,18 @@ export const categories = {
     const { data } = await api.post('/categories', category)
     return data
   },
-  update: async (id: string, category: Partial<Category>): Promise<Category> => {
-    const { data } = await api.patch(`/categories/${id}`, category)
+  update: async (
+    id: string,
+    category: Partial<Category>,
+    options?: { deactivateRules?: boolean },
+  ): Promise<Category> => {
+    const { data } = await api.patch(`/categories/${id}`, category, {
+      params: options?.deactivateRules ? { deactivate_rules: true } : undefined,
+    })
+    return data
+  },
+  ruleUsage: async (id: string): Promise<CategoryRuleUsage> => {
+    const { data } = await api.get(`/categories/${id}/rule-usage`)
     return data
   },
   delete: async (id: string): Promise<void> => {

@@ -958,10 +958,14 @@
     "ignoreTransfer": "Ignore this transfer",
     "ignoreTransferDesc": "Ignored transactions won't show on income or expense reports.",
     "ignoreTransferBadge": "Ignore",
-    "hiddenScopeDescription": "Hidden defaults are removed from category pickers. Existing transactions, budgets, dashboards, and reports continue to use them.",
+    "hiddenScopeDescription": "Hidden defaults are removed from category pickers and are no longer assigned by rules. Existing transactions, budgets, dashboards, and reports continue to use them.",
     "hiddenBadge": "Hidden",
     "showDefault": "Show default category",
-    "hideDefault": "Hide default category"
+    "hideDefault": "Hide default category",
+    "hideWithRulesTitle": "Hide {{name}}?",
+    "hideWithRulesDescription": "{{count}} active rules assign this category. Hiding it already stops them from categorizing new transactions, but they stay listed as active until you turn them off.",
+    "hideKeepRules": "Hide only",
+    "hideAndTurnOffRules": "Hide and turn off the rules"
   },
   "groups": {
     "title": "Category Groups",

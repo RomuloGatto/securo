@@ -60,6 +60,9 @@ export default function CategoriesPage() {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
   const [deletingCategory, setDeletingCategory] = useState<Category | null>(null)
   const [deletingGroup, setDeletingGroup] = useState<CategoryGroup | null>(null)
+  const [hidingCategory, setHidingCategory] = useState<
+    { category: Category; rules: { id: string; name: string }[] } | null
+  >(null)
 
   const { data: groups } = useQuery({
     queryKey: ['category-groups', 'management'],
@@ -83,6 +86,43 @@ export default function CategoriesPage() {
     mutationFn: ({ id, ...data }: Partial<Category> & { id: string }) => categoriesApi.update(id, data),
     onSuccess: () => { invalidateAll(); setCatDialogOpen(false); setEditingCat(null); toast.success(t('categories.updated')) },
   })
+
+  // Hiding is its own mutation: it can also retire the rules that assign the
+  // category, and it must refresh the rule list rather than the category form.
+  const hideCatMutation = useMutation({
+    mutationFn: ({ id, deactivateRules }: { id: string; deactivateRules: boolean }) =>
+      categoriesApi.update(id, { is_hidden: true }, { deactivateRules }),
+    onSuccess: (_data, variables) => {
+      invalidateAll()
+      if (variables.deactivateRules) queryClient.invalidateQueries({ queryKey: ['rules'] })
+      setHidingCategory(null)
+      toast.success(t('categories.updated'))
+    },
+    onError: (err: unknown) => toast.error(extractApiError(err, t('common.error'))),
+  })
+
+  // Rules that still file transactions into a category outlive hiding it, so
+  // check for them first and only interrupt the user when there are any.
+  async function handleToggleHidden(cat: Category) {
+    if (cat.is_hidden) {
+      updateCatMutation.mutate({ id: cat.id, is_hidden: false })
+      return
+    }
+    try {
+      const usage = await queryClient.fetchQuery({
+        queryKey: ['category-rule-usage', cat.id],
+        queryFn: () => categoriesApi.ruleUsage(cat.id),
+        staleTime: 0,
+      })
+      if (usage.rules.length === 0) {
+        hideCatMutation.mutate({ id: cat.id, deactivateRules: false })
+        return
+      }
+      setHidingCategory({ category: cat, rules: usage.rules })
+    } catch (err) {
+      toast.error(extractApiError(err, t('common.error')))
+    }
+  }
   const deleteCatMutation = useMutation({
     mutationFn: (id: string) => categoriesApi.delete(id),
     onSuccess: () => { invalidateAll(); setDeletingCategory(null); toast.success(t('categories.deleted')) },
@@ -185,8 +225,8 @@ export default function CategoriesPage() {
           {cat.is_system ? (
             <button
               className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-              onClick={() => updateCatMutation.mutate({ id: cat.id, is_hidden: !cat.is_hidden })}
-              disabled={updateCatMutation.isPending}
+              onClick={() => handleToggleHidden(cat)}
+              disabled={updateCatMutation.isPending || hideCatMutation.isPending}
               title={cat.is_hidden ? t('categories.showDefault') : t('categories.hideDefault')}
             >
               {cat.is_hidden ? <Eye size={13} /> : <EyeOff size={13} />}
@@ -471,6 +511,58 @@ export default function CategoriesPage() {
         onClose={() => setDeletingGroup(null)}
         onConfirm={() => deletingGroup && deleteGroupMutation.mutate(deletingGroup.id)}
       />
+
+      <Dialog open={!!hidingCategory} onOpenChange={(open) => !open && setHidingCategory(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {t('categories.hideWithRulesTitle', { name: hidingCategory?.category.name })}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              {t('categories.hideWithRulesDescription', { count: hidingCategory?.rules.length ?? 0 })}
+            </p>
+            <ul className="max-h-40 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+              {hidingCategory?.rules.map((rule) => (
+                <li key={rule.id} className="px-3 py-2 text-sm text-foreground truncate">
+                  {rule.name}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              variant="ghost"
+              onClick={() => setHidingCategory(null)}
+              disabled={hideCatMutation.isPending}
+            >
+              {t('common.cancel')}
+            </Button>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                onClick={() =>
+                  hidingCategory
+                  && hideCatMutation.mutate({ id: hidingCategory.category.id, deactivateRules: false })
+                }
+                disabled={hideCatMutation.isPending}
+              >
+                {t('categories.hideKeepRules')}
+              </Button>
+              <Button
+                onClick={() =>
+                  hidingCategory
+                  && hideCatMutation.mutate({ id: hidingCategory.category.id, deactivateRules: true })
+                }
+                disabled={hideCatMutation.isPending}
+              >
+                {t('categories.hideAndTurnOffRules')}
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

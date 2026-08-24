@@ -100,6 +100,11 @@ export interface Category {
   is_ignored: boolean
 }
 
+/** Active rules that assign a category, used when retiring one. */
+export interface CategoryRuleUsage {
+  rules: { id: string; name: string }[]
+}
+
 export interface CategoryGroup {
   id: string
   user_id: string

@@ -958,10 +958,14 @@
     "ignoreTransfer": "Ignorar Transações",
     "ignoreTransferDesc": "Transações ignoradas não contarão como receita ou despesa nos relatórios.",
     "ignoreTransferBadge": "Ignorado",
-    "hiddenScopeDescription": "As categorias predefinidas ocultas deixam de aparecer nos seletores. As transações, os orçamentos, os painéis e os relatórios existentes continuam a utilizá-las.",
+    "hiddenScopeDescription": "As categorias predefinidas ocultas deixam de aparecer nos seletores e deixam de ser atribuídas por regras. As transações, os orçamentos, os painéis e os relatórios existentes continuam a utilizá-las.",
     "hiddenBadge": "Oculta",
     "showDefault": "Mostrar categoria predefinida",
-    "hideDefault": "Ocultar categoria predefinida"
+    "hideDefault": "Ocultar categoria predefinida",
+    "hideWithRulesTitle": "Ocultar {{name}}?",
+    "hideWithRulesDescription": "{{count}} regras ativas atribuem esta categoria. Ocultá-la já impede que categorizem novas transações, mas continuam listadas como ativas até as desligar.",
+    "hideKeepRules": "Apenas ocultar",
+    "hideAndTurnOffRules": "Ocultar e desligar as regras"
   },
   "groups": {
     "title": "Grupos de Categorias",

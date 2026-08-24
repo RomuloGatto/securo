@@ -958,10 +958,14 @@
     "ignoreTransfer": "Diese Umbuchung ignorieren",
     "ignoreTransferDesc": "Ignorierte Transaktionen werden nicht in Einnahmen- oder Ausgabenberichten aufgeführt.",
     "ignoreTransferBadge": "Ignorieren",
-    "hiddenScopeDescription": "Ausgeblendete Standardkategorien werden aus den Kategorieauswahlen entfernt. Bestehende Transaktionen, Budgets, Dashboards und Berichte verwenden sie weiterhin.",
+    "hiddenScopeDescription": "Ausgeblendete Standardkategorien werden aus den Kategorieauswahlen entfernt und nicht mehr von Regeln zugewiesen. Bestehende Transaktionen, Budgets, Dashboards und Berichte verwenden sie weiterhin.",
     "hiddenBadge": "Ausgeblendet",
     "showDefault": "Standardkategorie anzeigen",
-    "hideDefault": "Standardkategorie ausblenden"
+    "hideDefault": "Standardkategorie ausblenden",
+    "hideWithRulesTitle": "{{name}} ausblenden?",
+    "hideWithRulesDescription": "{{count}} aktive Regeln weisen diese Kategorie zu. Das Ausblenden verhindert bereits, dass sie neue Transaktionen kategorisieren, sie bleiben aber als aktiv gelistet, bis du sie deaktivierst.",
+    "hideKeepRules": "Nur ausblenden",
+    "hideAndTurnOffRules": "Ausblenden und Regeln deaktivieren"
   },
   "groups": {
     "title": "Kategoriegruppen",

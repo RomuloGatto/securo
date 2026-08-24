@@ -36,3 +36,15 @@ class CategoryRead(CategoryBase):
     is_ignored: bool = False
 
     model_config = ConfigDict(from_attributes=True)
+
+class RuleSummary(BaseModel):
+    """Just enough of a rule to name it in the hide-category dialog."""
+
+    id: uuid.UUID
+    name: str
+
+
+class CategoryRuleUsage(BaseModel):
+    """Active rules that assign a category."""
+
+    rules: list[RuleSummary] = []

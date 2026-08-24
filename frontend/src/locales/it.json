@@ -958,10 +958,14 @@
     "ignoreTransfer": "Ignora questo trasferimento",
     "ignoreTransferDesc": "Le transazioni ignorate non appariranno nei report di entrate o spese.",
     "ignoreTransferBadge": "Ignora",
-    "hiddenScopeDescription": "Le categorie predefinite nascoste vengono rimosse dai selettori. Le transazioni, i budget, le dashboard e i report esistenti continuano a utilizzarle.",
+    "hiddenScopeDescription": "Le categorie predefinite nascoste vengono rimosse dai selettori e non vengono più assegnate dalle regole. Le transazioni, i budget, le dashboard e i report esistenti continuano a utilizzarle.",
     "hiddenBadge": "Nascosta",
     "showDefault": "Mostra categoria predefinita",
-    "hideDefault": "Nascondi categoria predefinita"
+    "hideDefault": "Nascondi categoria predefinita",
+    "hideWithRulesTitle": "Nascondere {{name}}?",
+    "hideWithRulesDescription": "{{count}} regole attive assegnano questa categoria. Nasconderla impedisce già di categorizzare nuove transazioni, ma restano elencate come attive finché non le disattivi.",
+    "hideKeepRules": "Nascondi soltanto",
+    "hideAndTurnOffRules": "Nascondi e disattiva le regole"
   },
   "groups": {
     "title": "Gruppi di categorie",
