@@ -17,6 +17,7 @@
     "addMember": "Aggiungi membro",
     "addMemberTitle": "Aggiungi membro",
     "addMemberDescription": "Invita un utente esistente tramite email, oppure crea un nuovo account fornendo una password.",
+    "addMemberDescriptionExistingOnly": "Invita un utente esistente tramite e-mail.",
     "role": "Ruolo",
     "roleOwner": "Proprietario",
     "roleEditor": "Editore",

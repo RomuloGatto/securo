@@ -17,6 +17,7 @@
     "addMember": "Mitglied hinzufügen",
     "addMemberTitle": "Mitglied hinzufügen",
     "addMemberDescription": "Lade einen bestehenden Benutzer per E-Mail ein oder erstelle ein neues Konto durch Angabe eines Passworts.",
+    "addMemberDescriptionExistingOnly": "Lade eine vorhandene Person per E-Mail ein.",
     "role": "Rolle",
     "roleOwner": "Besitzer",
     "roleEditor": "Editor",

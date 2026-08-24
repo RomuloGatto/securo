@@ -161,6 +161,26 @@ async def test_invite_cannot_create_password_user_when_local_auth_disabled(
 
 
 @pytest.mark.asyncio
+async def test_invite_unknown_user_without_password_points_at_oidc_when_local_auth_disabled(
+    client: AsyncClient,
+    test_user,
+    test_workspace,
+    oidc_only_settings,
+):
+    token = await get_jwt_strategy().write_token(test_user)
+    resp = await client.post(
+        f"/api/workspaces/{test_workspace.id}/members",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"email": "oidc-only@example.com", "role": "editor"},
+    )
+
+    assert resp.status_code == 400
+    # Asking for a password would be dead-end advice in OIDC-only mode.
+    assert "password" not in resp.json()["detail"].lower()
+    assert "identity provider" in resp.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_invite_unknown_user_without_password_400(client: AsyncClient, auth_headers, test_workspace):
     resp = await client.post(
         f"/api/workspaces/{test_workspace.id}/members",

@@ -17,6 +17,7 @@
     "addMember": "Add member",
     "addMemberTitle": "Add member",
     "addMemberDescription": "Invite an existing user by email, or create a new account by providing a password.",
+    "addMemberDescriptionExistingOnly": "Invite an existing user by email.",
     "role": "Role",
     "roleOwner": "Owner",
     "roleEditor": "Editor",

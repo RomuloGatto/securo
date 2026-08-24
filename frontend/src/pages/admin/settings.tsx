@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useTheme } from 'next-themes'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { admin as adminApi, auth as authApi, currencies as currenciesApi } from '@/lib/api'
+import { admin as adminApi, currencies as currenciesApi } from '@/lib/api'
 import { resolveDisplayLocale, resolveDateLocale, type NumberFormat, type DateFormat } from '@/lib/format'
 import { resolveSupportedLang } from '@/lib/i18n'
 import { useAuth } from '@/contexts/auth-context'
@@ -30,7 +30,7 @@ import {
 } from '@/components/ui/select'
 import { PageHeader } from '@/components/page-header'
 import { setThemeBasedOnSystem } from '@/lib/theme-utils'
-import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
+import { useLocalAuthEnabled } from '@/hooks/use-local-auth'
 import { Search, Plus, Trash2, Shield, ShieldOff, UserCog, Users, Scale, Tag, Palette, Save, Hash, CalendarDays } from 'lucide-react'
 import type { AdminUser } from '@/types'
 
@@ -66,12 +66,7 @@ export default function AdminSettingsPage() {
     queryKey: ['admin', 'users', search],
     queryFn: () => adminApi.listUsers({ search: search || undefined }),
   })
-  const { data: oidcConfig, isError: oidcConfigFailed } = useQuery({
-    queryKey: ['auth', 'oidc-config'],
-    queryFn: authApi.oidcConfig,
-    staleTime: 60_000,
-  })
-  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
+  const localAuthEnabled = useLocalAuthEnabled()
 
   const createMutation = useMutation({
     mutationFn: (data: { email: string; password: string; is_superuser: boolean; preferences: Record<string, unknown> }) =>

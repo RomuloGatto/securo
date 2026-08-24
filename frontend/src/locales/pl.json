@@ -17,6 +17,7 @@
     "addMember": "Dodaj członka",
     "addMemberTitle": "Dodaj członka",
     "addMemberDescription": "Zaproś istniejącego użytkownika przez e-mail albo utwórz nowe konto, podając hasło.",
+    "addMemberDescriptionExistingOnly": "Zaproś istniejącego użytkownika przez e-mail.",
     "role": "Rola",
     "roleOwner": "Właściciel",
     "roleEditor": "Edytor",

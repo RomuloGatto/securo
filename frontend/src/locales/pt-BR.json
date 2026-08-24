@@ -17,6 +17,7 @@
     "addMember": "Adicionar membro",
     "addMemberTitle": "Adicionar membro",
     "addMemberDescription": "Convide um usuário existente por email, ou crie uma nova conta fornecendo uma senha.",
+    "addMemberDescriptionExistingOnly": "Convide um usuário existente pelo e-mail.",
     "role": "Papel",
     "roleOwner": "Dono",
     "roleEditor": "Editor",

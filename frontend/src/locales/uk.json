@@ -17,6 +17,7 @@
     "addMember": "Додати учасника",
     "addMemberTitle": "Додати учасника",
     "addMemberDescription": "Запросіть наявного користувача за email або створіть новий обліковий запис, вказавши пароль.",
+    "addMemberDescriptionExistingOnly": "Запросіть наявного користувача за електронною поштою.",
     "role": "Роль",
     "roleOwner": "Власник",
     "roleEditor": "Редактор",

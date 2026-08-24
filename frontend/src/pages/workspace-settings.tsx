@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { auth as authApi, currencies as currenciesApi, fiscal as fiscalApi, workspaces as workspacesApi } from '@/lib/api'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
-import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
+import { useLocalAuthEnabled } from '@/hooks/use-local-auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -126,12 +126,7 @@ export default function WorkspaceSettingsPage() {
     staleTime: Infinity,
   })
 
-  const { data: oidcConfig, isError: oidcConfigFailed } = useQuery({
-    queryKey: ['auth', 'oidc-config'],
-    queryFn: authApi.oidcConfig,
-    staleTime: 60_000,
-  })
-  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
+  const localAuthEnabled = useLocalAuthEnabled()
 
   // The server lists codes; the user reads names. Sorted by the name actually
   // shown, in the reader's own collation.
@@ -618,7 +613,13 @@ export default function WorkspaceSettingsPage() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{t('workspace.addMemberTitle')}</DialogTitle>
-            <DialogDescription>{t('workspace.addMemberDescription')}</DialogDescription>
+            <DialogDescription>
+              {t(
+                localAuthEnabled
+                  ? 'workspace.addMemberDescription'
+                  : 'workspace.addMemberDescriptionExistingOnly',
+              )}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-1">
             <div className="space-y-1.5">

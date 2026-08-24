@@ -17,14 +17,12 @@ router = APIRouter()
 TEMP_TOKEN_TTL = 300  # 5 minutes
 
 
-@router.post("/login")
+@router.post("/login", dependencies=[Depends(require_local_auth_enabled)])
 async def login(
     credentials: OAuth2PasswordRequestForm = Depends(),
     user_manager=Depends(get_user_manager),
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
-
     user = await user_manager.authenticate(credentials)
     if user is None or not user.is_active:
         raise HTTPException(status_code=400, detail="LOGIN_BAD_CREDENTIALS")

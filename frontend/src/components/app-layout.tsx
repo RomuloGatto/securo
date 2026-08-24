@@ -60,7 +60,7 @@ import { GlobalChatPanel } from '@/components/global-chat-panel'
 import { useFeatureFlags } from '@/hooks/use-feature-flags'
 import { Bot, Search, Sparkles } from 'lucide-react'
 import { setThemeBasedOnSystem } from '@/lib/theme-utils'
-import { resolveLocalAuthEnabled } from '@/lib/auth-config-utils'
+import { useLocalAuthEnabled } from '@/hooks/use-local-auth'
 import { formatCurrency } from '@/lib/format'
 
 /** Placeholder rows shown while the workspace's module list is in flight. */
@@ -117,12 +117,7 @@ export function AppLayout() {
   // read-only session only exposes the reading ones; then this becomes
   // `agentsEnabled` again.
   const chatAvailable = agentsEnabled && canWrite
-  const { data: oidcConfig, isError: oidcConfigFailed } = useQuery({
-    queryKey: ['auth', 'oidc-config'],
-    queryFn: authApi.oidcConfig,
-    staleTime: 60_000,
-  })
-  const localAuthEnabled = resolveLocalAuthEnabled(oidcConfig, oidcConfigFailed)
+  const localAuthEnabled = useLocalAuthEnabled()
 
   // ⌘J / Ctrl+J toggles the global slide-over chat from anywhere.
   // Distinct from ⌘K (command palette) so users can have both open.

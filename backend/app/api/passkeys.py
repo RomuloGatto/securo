@@ -200,14 +200,17 @@ async def list_passkeys(
     return result.scalars().all()
 
 
-@router.post("/passkeys/register/options", response_model=PasskeyOptionsResponse)
+@router.post(
+    "/passkeys/register/options",
+    response_model=PasskeyOptionsResponse,
+    dependencies=[Depends(require_local_auth_enabled)],
+)
 async def passkey_registration_options(
     request: Request,
     body: PasskeyRegisterOptionsRequest,
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     settings = get_settings()
     context = resolve_webauthn_context(request)
     existing = await session.execute(select(UserPasskey).where(UserPasskey.user_id == user.id))
@@ -243,13 +246,16 @@ async def passkey_registration_options(
     return PasskeyOptionsResponse(challenge_id=challenge_id, options=_options_dict(options))
 
 
-@router.post("/passkeys/register/verify", response_model=PasskeyRead)
+@router.post(
+    "/passkeys/register/verify",
+    response_model=PasskeyRead,
+    dependencies=[Depends(require_local_auth_enabled)],
+)
 async def verify_passkey_registration(
     body: PasskeyRegisterVerifyRequest,
     user: User = Depends(current_active_user),
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     challenge = await _pop_challenge(REGISTER_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != str(user.id):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
@@ -307,14 +313,13 @@ async def delete_passkey(
 @router.post(
     "/passkeys/authenticate/options",
     response_model=PasskeyOptionsResponse,
-    dependencies=[Depends(login_rate_limit)],
+    dependencies=[Depends(require_local_auth_enabled), Depends(login_rate_limit)],
 )
 async def passkey_authentication_options(
     request: Request,
     body: PasskeyAuthenticateOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     context = resolve_webauthn_context(request)
     email = body.email.strip().lower() if body.email else None
     expected_user_id: str | None = None
@@ -358,12 +363,14 @@ async def passkey_authentication_options(
     return PasskeyOptionsResponse(challenge_id=challenge_id, options=_options_dict(options))
 
 
-@router.post("/passkeys/authenticate/verify", dependencies=[Depends(login_rate_limit)])
+@router.post(
+    "/passkeys/authenticate/verify",
+    dependencies=[Depends(require_local_auth_enabled), Depends(login_rate_limit)],
+)
 async def verify_passkey_authentication(
     body: PasskeyAuthenticateVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     challenge = await _pop_challenge(AUTHENTICATE_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired challenge")
@@ -394,13 +401,16 @@ async def verify_passkey_authentication(
     return {"access_token": token, "token_type": "bearer"}
 
 
-@router.post("/passkeys/2fa/options", response_model=PasskeyOptionsResponse, dependencies=[Depends(login_rate_limit)])
+@router.post(
+    "/passkeys/2fa/options",
+    response_model=PasskeyOptionsResponse,
+    dependencies=[Depends(require_local_auth_enabled), Depends(login_rate_limit)],
+)
 async def passkey_second_factor_options(
     request: Request,
     body: PasskeySecondFactorOptionsRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     context = resolve_webauthn_context(request)
     user_id = await _get_second_factor_user_id(body.temp_token)
     result = await session.execute(
@@ -430,12 +440,14 @@ async def passkey_second_factor_options(
     return PasskeyOptionsResponse(challenge_id=challenge_id, options=_options_dict(options))
 
 
-@router.post("/passkeys/2fa/verify", dependencies=[Depends(login_rate_limit)])
+@router.post(
+    "/passkeys/2fa/verify",
+    dependencies=[Depends(require_local_auth_enabled), Depends(login_rate_limit)],
+)
 async def verify_passkey_second_factor(
     body: PasskeySecondFactorVerifyRequest,
     session: AsyncSession = Depends(get_async_session),
 ):
-    require_local_auth_enabled()
     user_id = await _get_second_factor_user_id(body.temp_token)
     challenge = await _pop_challenge(SECOND_FACTOR_CHALLENGE_PREFIX, body.challenge_id)
     if not challenge or challenge.get("user_id") != user_id:

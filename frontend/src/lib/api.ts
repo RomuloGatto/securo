@@ -263,7 +263,10 @@ export const auth = {
     return data
   },
   oidcConfig: async (): Promise<{ enabled: boolean; provider_name: string; local_auth_enabled: boolean }> => {
-    const { data } = await api.get('/auth/oidc/config')
+    // The login card blocks on this call while it decides which sign-in
+    // methods to offer, so a hung request must fail fast and let the caller
+    // fall back instead of leaving the page stuck on its loading state.
+    const { data } = await api.get('/auth/oidc/config', { timeout: 5000 })
     return data
   },
 }
