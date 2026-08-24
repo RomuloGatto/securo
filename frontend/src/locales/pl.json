@@ -1023,7 +1023,7 @@
     "showDefault": "Pokaż domyślną kategorię",
     "hideDefault": "Ukryj domyślną kategorię",
     "hideWithRulesTitle": "Ukryć {{name}}?",
-    "hideWithRulesDescription": "Tę kategorię przypisuje {{count}} aktywnych reguł. Ukrycie jej już powstrzymuje je przed kategoryzowaniem nowych transakcji, ale pozostaną na liście jako aktywne, dopóki ich nie wyłączysz.",
+    "hideWithRulesDescription": "Tę kategorię przypisuje {{count}} aktywnych reguł. Ukrycie jej już powstrzymuje je przed kategoryzowaniem nowych transakcji. Wyłączenie zatrzymuje całą regułę, w tym odbiorcę i notatki, które również ustawia.",
     "hideKeepRules": "Tylko ukryj",
     "hideAndTurnOffRules": "Ukryj i wyłącz reguły"
   },

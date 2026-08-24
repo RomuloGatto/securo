@@ -963,7 +963,7 @@
     "showDefault": "Afficher la catégorie par défaut",
     "hideDefault": "Masquer la catégorie par défaut",
     "hideWithRulesTitle": "Masquer {{name}} ?",
-    "hideWithRulesDescription": "{{count}} règles actives attribuent cette catégorie. La masquer les empêche déjà de catégoriser de nouvelles transactions, mais elles restent affichées comme actives tant que vous ne les désactivez pas.",
+    "hideWithRulesDescription": "{{count}} règles actives attribuent cette catégorie. La masquer les empêche déjà de catégoriser de nouvelles transactions. Les désactiver arrête la règle entière, y compris le bénéficiaire ou les notes qu’elle définit aussi.",
     "hideKeepRules": "Masquer seulement",
     "hideAndTurnOffRules": "Masquer et désactiver les règles"
   },

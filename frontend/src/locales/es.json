@@ -963,7 +963,7 @@
     "showDefault": "Mostrar categoría predeterminada",
     "hideDefault": "Ocultar categoría predeterminada",
     "hideWithRulesTitle": "¿Ocultar {{name}}?",
-    "hideWithRulesDescription": "{{count}} reglas activas asignan esta categoría. Ocultarla ya impide que categoricen nuevas transacciones, pero seguirán apareciendo como activas hasta que las desactives.",
+    "hideWithRulesDescription": "{{count}} reglas activas asignan esta categoría. Ocultarla ya impide que categoricen nuevas transacciones. Desactivarlas detiene la regla completa, incluidos el beneficiario o las notas que también establece.",
     "hideKeepRules": "Solo ocultar",
     "hideAndTurnOffRules": "Ocultar y desactivar las reglas"
   },

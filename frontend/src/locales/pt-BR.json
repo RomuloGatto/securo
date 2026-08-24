@@ -963,7 +963,7 @@
     "showDefault": "Mostrar categoria padrão",
     "hideDefault": "Ocultar categoria padrão",
     "hideWithRulesTitle": "Ocultar {{name}}?",
-    "hideWithRulesDescription": "{{count}} regras ativas atribuem esta categoria. Ocultá-la já impede que elas categorizem novas transações, mas elas continuam listadas como ativas até você desligá-las.",
+    "hideWithRulesDescription": "{{count}} regras ativas atribuem esta categoria. Ocultá-la já impede que elas categorizem novas transações. Desligá-las para a regra inteira, incluindo a pessoa ou as notas que ela também define.",
     "hideKeepRules": "Apenas ocultar",
     "hideAndTurnOffRules": "Ocultar e desligar as regras"
   },
