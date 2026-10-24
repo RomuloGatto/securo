@@ -45,8 +45,16 @@ export async function extractApiErrorAsync(
   error: unknown,
   fallback = DEFAULT_ERROR,
 ): Promise<string> {
-  const response = (error as { response?: { data?: unknown } } | null)?.response
-  const localFallback = !response && error instanceof Error ? error.message : fallback
+  const axiosError = error as {
+    isAxiosError?: boolean
+    response?: { data?: unknown }
+  } | null
+  const response = axiosError?.response
+  // Axios network/transport failures are Error instances too, but their raw
+  // messages are not user-facing and must not replace a translated fallback.
+  const localFallback = !response && error instanceof Error && !axiosError?.isAxiosError
+    ? error.message
+    : fallback
   const data = response?.data
 
   if (!(data instanceof Blob)) return extractApiError(error, localFallback)

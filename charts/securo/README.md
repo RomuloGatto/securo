@@ -23,8 +23,9 @@ Since the Backend, Celery Worker, Celery Beat, and MCP Server share persistent f
 If your storage only supports `ReadWriteOnce` (RWO), you must restrict all Securo pods to run on a single node (using `nodeSelector` or `podAffinity`) but that is an antipattern in Kubernetes.
 
 Managed backup persistence is opt-in. Enable it with
-`--set persistence.backups.enabled=true`; without that value, stored and
-scheduled backup ZIPs use pod-local storage and do not survive pod replacement.
+`--set persistence.backups.enabled=true`; without that value, managed ZIPs use
+pod-local storage and scheduled backups are disabled because the API and worker
+do not share a filesystem. Direct backup downloads remain available.
 
 ## Quickstart
 

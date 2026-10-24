@@ -69,4 +69,11 @@ describe('extractApiErrorAsync', () => {
       extractApiErrorAsync(new Error('Choose a backup ZIP first.'), 'Fallback'),
     ).resolves.toBe('Choose a backup ZIP first.')
   })
+
+  it('uses the translated fallback for Axios transport failures', async () => {
+    const error = Object.assign(new Error('Network Error'), { isAxiosError: true })
+    await expect(extractApiErrorAsync(error, 'Localized fallback')).resolves.toBe(
+      'Localized fallback',
+    )
+  })
 })

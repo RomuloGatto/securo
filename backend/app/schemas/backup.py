@@ -19,6 +19,7 @@ class BackupRestoreMode(StrEnum):
 
 class BackupConfig(BaseModel):
     scheduled_enabled: bool = False
+    storage_shared: bool = True
     schedule: Literal["daily", "weekly"] = "daily"
     content: BackupContent = BackupContent.both
     retention_count: int = Field(default=10, ge=1, le=200)

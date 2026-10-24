@@ -1625,6 +1625,7 @@ export type BackupRestoreMode = 'new_workspace' | 'current_workspace'
 
 export interface BackupConfig {
   scheduled_enabled: boolean
+  storage_shared: boolean
   schedule: 'daily' | 'weekly'
   content: BackupContent
   retention_count: number

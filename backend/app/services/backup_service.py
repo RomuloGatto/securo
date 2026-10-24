@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import re
 import uuid
 import zipfile
@@ -13,10 +14,12 @@ from typing import Any
 
 import pyzipper
 from fastapi import HTTPException, status
+from pydantic import ValidationError
 from sqlalchemy import Date, DateTime, Numeric, delete, insert, select, update
 from sqlalchemy.dialects.postgresql import UUID as PgUUID
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.models.account import Account
 from app.models.app_settings import AppSetting
 from app.models.asset import Asset
@@ -73,6 +76,7 @@ CONFIG_KEY_PREFIX = "backup:"
 CONFIG_KEY_SUFFIX = ":config"
 BACKUP_STORAGE_PATH = Path("/app/data/backups")
 _COMPRESSION = zipfile.ZIP_DEFLATED
+logger = logging.getLogger(__name__)
 
 
 def build_backup_archive(files: dict[str, object], password: str | None = None) -> bytes:
@@ -297,8 +301,8 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _parse_dt(value: str | None) -> datetime | None:
-    if not value:
+def _parse_dt(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
         return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -417,12 +421,13 @@ def _invoice_logo_ids(name: str, row: dict[str, Any]) -> list[str]:
 async def get_backup_config(session: AsyncSession, workspace_id: uuid.UUID) -> BackupConfig:
     setting = await session.get(AppSetting, _config_key(workspace_id))
     if setting is None:
-        return BackupConfig()
+        return BackupConfig(storage_shared=get_settings().backup_storage_shared)
     try:
         raw = json.loads(setting.value)
     except json.JSONDecodeError:
         raw = {}
     cfg = BackupConfig(**raw)
+    cfg.storage_shared = get_settings().backup_storage_shared
     cfg.next_run_at = _next_run(cfg.last_run_at, cfg.schedule)
     return cfg
 
@@ -432,8 +437,16 @@ async def save_backup_config(
     workspace_id: uuid.UUID,
     updates: dict[str, Any],
 ) -> BackupConfig:
+    if updates.get("scheduled_enabled") is True and not get_settings().backup_storage_shared:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Scheduled backups require shared persistent backup storage. "
+                "Enable persistence.backups.enabled for Helm deployments."
+            ),
+        )
     current = await get_backup_config(session, workspace_id)
-    data = current.model_dump(mode="json")
+    data = current.model_dump(mode="json", exclude={"storage_shared"})
     data.update(
         {
             key: value
@@ -442,9 +455,10 @@ async def save_backup_config(
         }
     )
     cfg = BackupConfig(**data)
+    cfg.storage_shared = get_settings().backup_storage_shared
     cfg.next_run_at = _next_run(cfg.last_run_at, cfg.schedule)
     setting = await session.get(AppSetting, _config_key(workspace_id))
-    value = cfg.model_dump_json(exclude={"next_run_at"})
+    value = cfg.model_dump_json(exclude={"next_run_at", "storage_shared"})
     if setting is None:
         setting = AppSetting(key=_config_key(workspace_id), value=value)
         session.add(setting)
@@ -617,16 +631,22 @@ def preview_backup_bytes(data: bytes) -> BackupPreview:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid backup file: entity_counts must contain a JSON object",
         )
-    return BackupPreview(
-        valid=True,
-        format_version=str(metadata.get("format_version") or "unknown"),
-        export_date=export_date,
-        workspace_id=workspace_id,
-        workspace_name=metadata.get("workspace_name"),
-        content=backup_content,
-        entity_counts=entity_counts,
-        warnings=warnings,
-    )
+    try:
+        return BackupPreview(
+            valid=True,
+            format_version=str(metadata.get("format_version") or "unknown"),
+            export_date=export_date,
+            workspace_id=workspace_id,
+            workspace_name=metadata.get("workspace_name"),
+            content=backup_content,
+            entity_counts=entity_counts,
+            warnings=warnings,
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid backup metadata: {exc}",
+        ) from exc
 
 
 def _item_from_path(path: Path) -> BackupItem | None:
@@ -959,6 +979,23 @@ async def _insert_associations(
     return len(prepared)
 
 
+async def _undo_restore_storage_changes(
+    storage: Any,
+    changes: list[tuple[str, bytes | None, str]],
+) -> None:
+    """Restore overwritten files and remove new files after a DB rollback."""
+    for key, previous_data, content_type in reversed(changes):
+        try:
+            if previous_data is None:
+                await storage.delete(key)
+            else:
+                await storage.upload(key, previous_data, content_type)
+        except Exception:
+            # Preserve the original restore failure. Storage cleanup is best-effort
+            # because there is no transaction spanning SQL and the file provider.
+            logger.exception("Could not roll back restored storage object %s", key)
+
+
 async def restore_backup_bytes(
     session: AsyncSession,
     *,
@@ -984,6 +1021,8 @@ async def restore_backup_bytes(
     # auth model into module import paths that only need backup metadata helpers.
     from app.models.user import User
 
+    storage = get_storage_provider()
+    storage_changes: list[tuple[str, bytes | None, str]] = []
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             names = _archive_entity_names(zf, selected_names)
@@ -1021,7 +1060,6 @@ async def restore_backup_bytes(
                     session, target_workspace.id, names
                 )
 
-            storage = get_storage_provider()
             uploaded_logo_ids: set[str] = set()
             for name in RESTORE_ORDER:
                 if name not in names:
@@ -1048,13 +1086,17 @@ async def restore_backup_bytes(
                                     f"missing: {logo_id}"
                                 )
                                 continue
-                            await storage.upload(
-                                invoice_logo_service.storage_key(
-                                    target_workspace.id, uuid.UUID(logo_id)
-                                ),
-                                zf.read(backup_path),
-                                "image/png",
+                            logo_key = invoice_logo_service.storage_key(
+                                target_workspace.id, uuid.UUID(logo_id)
                             )
+                            previous_logo = None
+                            if mode == BackupRestoreMode.current_workspace:
+                                try:
+                                    previous_logo = await storage.download(logo_key)
+                                except FileNotFoundError:
+                                    pass
+                            storage_changes.append((logo_key, previous_logo, "image/png"))
+                            await storage.upload(logo_key, zf.read(backup_path), "image/png")
                             uploaded_logo_ids.add(logo_id)
 
                 if name in {"transaction_attachments", "invoice_attachments"}:
@@ -1089,10 +1131,12 @@ async def restore_backup_bytes(
                                 f"{target_workspace.id}/invoices/{parent_id}/"
                                 f"{uuid.uuid4().hex[:8]}_{filename}"
                             )
+                        content_type = prepared.get("content_type") or "application/octet-stream"
+                        storage_changes.append((storage_key, None, content_type))
                         stored = await storage.upload(
                             storage_key,
                             attachment_data,
-                            prepared.get("content_type") or "application/octet-stream",
+                            content_type,
                         )
                         prepared["filename"] = filename
                         prepared["storage_key"] = stored.storage_key
@@ -1150,6 +1194,7 @@ async def restore_backup_bytes(
                 warnings=warnings,
             )
             await session.commit()
+            storage_changes.clear()
             for key in stale_storage_keys:
                 try:
                     await storage.delete(key)
@@ -1159,14 +1204,22 @@ async def restore_backup_bytes(
                     )
             return response
     except HTTPException:
-        await session.rollback()
+        try:
+            await session.rollback()
+        finally:
+            await _undo_restore_storage_changes(storage, storage_changes)
         raise
     except Exception as exc:
-        await session.rollback()
+        try:
+            await session.rollback()
+        finally:
+            await _undo_restore_storage_changes(storage, storage_changes)
         raise HTTPException(status_code=400, detail=f"Could not restore backup: {exc}")
 
 
 async def run_scheduled_backups(session: AsyncSession) -> dict[str, Any]:
+    if not get_settings().backup_storage_shared:
+        return {"created": 0, "skipped": 0, "errors": []}
     result = await session.execute(
         select(AppSetting).where(AppSetting.key.like(f"{CONFIG_KEY_PREFIX}%{CONFIG_KEY_SUFFIX}"))
     )

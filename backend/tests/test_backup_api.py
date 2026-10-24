@@ -102,6 +102,50 @@ async def test_backup_config_roundtrip(client: AsyncClient, auth_headers, backup
 
 
 @pytest.mark.asyncio
+async def test_scheduled_backups_require_shared_storage(
+    client: AsyncClient,
+    auth_headers,
+    backup_dir,
+    session: AsyncSession,
+    monkeypatch,
+):
+    enabled_resp = await client.put(
+        "/api/backups/config",
+        json={"scheduled_enabled": True},
+        headers=auth_headers,
+    )
+    assert enabled_resp.status_code == 200
+
+    from app.core.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "backup_storage_shared", False)
+
+    config_resp = await client.get("/api/backups/config", headers=auth_headers)
+    assert config_resp.status_code == 200
+    assert config_resp.json()["storage_shared"] is False
+
+    update_resp = await client.put(
+        "/api/backups/config",
+        json={"scheduled_enabled": False, "retention_count": 5},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["storage_shared"] is False
+
+    rejected_resp = await client.put(
+        "/api/backups/config",
+        json={"scheduled_enabled": True},
+        headers=auth_headers,
+    )
+    assert rejected_resp.status_code == 400
+    assert "shared persistent backup storage" in rejected_resp.json()["detail"]
+
+    run_result = await backup_service.run_scheduled_backups(session)
+    assert run_result == {"created": 0, "skipped": 0, "errors": []}
+    assert list(backup_dir.glob("*.zip")) == []
+
+
+@pytest.mark.asyncio
 async def test_run_list_preview_and_download_stored_backup(
     client: AsyncClient,
     auth_headers,
@@ -180,6 +224,39 @@ async def test_preview_rejects_encrypted_and_non_object_backups(client: AsyncCli
     )
     assert non_object_resp.status_code == 400
     assert "json object" in non_object_resp.json()["detail"].lower()
+
+    numeric_date = backup_service.build_backup_archive(
+        {"metadata.json": {**metadata, "export_date": 123}}
+    )
+    numeric_date_resp = await client.post(
+        "/api/backups/preview-upload",
+        files={"file": ("numeric-date.zip", numeric_date, "application/zip")},
+        headers=auth_headers,
+    )
+    assert numeric_date_resp.status_code == 200
+    assert numeric_date_resp.json()["export_date"] is None
+
+    invalid_counts = backup_service.build_backup_archive(
+        {"metadata.json": {**metadata, "entity_counts": {"accounts": "many"}}}
+    )
+    invalid_counts_resp = await client.post(
+        "/api/backups/preview-upload",
+        files={"file": ("invalid-counts.zip", invalid_counts, "application/zip")},
+        headers=auth_headers,
+    )
+    assert invalid_counts_resp.status_code == 400
+    assert "invalid backup metadata" in invalid_counts_resp.json()["detail"].lower()
+
+    invalid_name = backup_service.build_backup_archive(
+        {"metadata.json": {**metadata, "workspace_name": 123}}
+    )
+    invalid_name_resp = await client.post(
+        "/api/backups/preview-upload",
+        files={"file": ("invalid-name.zip", invalid_name, "application/zip")},
+        headers=auth_headers,
+    )
+    assert invalid_name_resp.status_code == 400
+    assert "invalid backup metadata" in invalid_name_resp.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -333,6 +410,11 @@ async def test_failed_current_restore_keeps_existing_attachment_file(
     storage_key = f"{test_workspace.id}/{transaction.id}/before-restore.txt"
     attachment_data = b"must survive rollback"
     stored = await storage.upload(storage_key, attachment_data, "text/plain")
+    logo_id = uuid.uuid4()
+    logo_key = invoice_logo_service.storage_key(test_workspace.id, logo_id)
+    old_logo_data = b"must also survive rollback"
+    restored_logo_data = b"incoming logo must be rolled back"
+    await storage.upload(logo_key, old_logo_data, "image/png")
     attachment = TransactionAttachment(
         transaction_id=transaction.id,
         user_id=test_user.id,
@@ -342,7 +424,12 @@ async def test_failed_current_restore_keeps_existing_attachment_file(
         content_type=stored.content_type,
         size=stored.size,
     )
-    session.add(attachment)
+    invoice_settings = InvoiceSettings(
+        workspace_id=test_workspace.id,
+        logo_id=logo_id,
+        issuer_display_name="Existing issuer",
+    )
+    session.add_all([attachment, invoice_settings])
     await session.commit()
     attachment_id = attachment.id
 
@@ -358,10 +445,10 @@ async def test_failed_current_restore_keeps_existing_attachment_file(
     ):
         for info in source.infolist():
             payload = source.read(info.filename)
-            if info.filename == "accounts.json":
-                rows = json.loads(payload)
-                rows[0]["id"] = "not-a-uuid"
-                payload = json.dumps(rows).encode()
+            if info.filename == f"invoice_logos/{logo_id}.png":
+                payload = restored_logo_data
+            if info.filename == "goals.json":
+                payload = json.dumps([{"id": "not-a-uuid"}]).encode()
             target.writestr(info, payload)
 
     with pytest.raises(HTTPException) as exc_info:
@@ -379,6 +466,7 @@ async def test_failed_current_restore_keeps_existing_attachment_file(
     session.expire_all()
     assert await session.get(TransactionAttachment, attachment_id) is not None
     assert await storage.download(storage_key) == attachment_data
+    assert await storage.download(logo_key) == old_logo_data
 
 
 @pytest.mark.asyncio

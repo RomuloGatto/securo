@@ -165,7 +165,7 @@ export default function BackupPage() {
     if (!cfg) return
     // Hydrate the editable form from the server config when the query resolves.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setScheduledEnabled(cfg.scheduled_enabled)
+    setScheduledEnabled(cfg.storage_shared && cfg.scheduled_enabled)
     setSchedule(cfg.schedule)
     setConfigContent(cfg.content)
     setRetentionCount(String(cfg.retention_count))
@@ -414,7 +414,12 @@ export default function BackupPage() {
               <CardTitle className="text-base">{t('backup.scheduleTitle')}</CardTitle>
               <CardDescription className="max-w-4xl text-xs leading-5">{t('backup.scheduleDescription')}</CardDescription>
             </div>
-            <Switch checked={scheduledEnabled} onCheckedChange={setScheduledEnabled} className="shrink-0" />
+            <Switch
+              checked={scheduledEnabled}
+              onCheckedChange={setScheduledEnabled}
+              disabled={configQuery.data?.storage_shared === false}
+              className="shrink-0"
+            />
           </div>
         </CardHeader>
         <CardContent className="space-y-3 px-4 pb-4">
