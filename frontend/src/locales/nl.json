@@ -2449,6 +2449,7 @@
     "restore": "Herstellen",
     "previewError": "Kan back-upbestand niet lezen",
     "configError": "Kan back-upinstellingen niet opslaan",
+    "invalidRetention": "Voer een positief geheel getal in.",
     "unknownWorkspace": "Onbekende workspace",
     "running": "Bezig…",
     "emptyStored": "Nog geen opgeslagen back-ups. Maak er nu een of schakel het schema in.",

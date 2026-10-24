@@ -2457,6 +2457,7 @@
     "restore": "Restore",
     "previewError": "Could not read backup file",
     "configError": "Could not save backup settings",
+    "invalidRetention": "Introduce un número entero positivo.",
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",

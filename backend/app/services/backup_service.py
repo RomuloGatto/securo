@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import io
 import json
 import logging
@@ -104,6 +105,13 @@ def build_backup_archive(files: dict[str, object], password: str | None = None) 
 class EntitySpec:
     name: str
     model: type | None = None
+
+
+@dataclass(frozen=True)
+class PreservedReference:
+    model: type
+    row_id: uuid.UUID
+    values: dict[str, Any]
 
 
 RESTORE_ORDER: list[str] = [
@@ -582,20 +590,24 @@ async def build_backup_zip(
     return buf.getvalue()
 
 
-def _metadata_from_zip_bytes(data: bytes) -> tuple[dict[str, Any], list[str]]:
+def _metadata_from_zip(zf: zipfile.ZipFile) -> tuple[dict[str, Any], list[str]]:
     warnings: list[str] = []
+    if "metadata.json" not in zf.namelist():
+        raise ValueError("metadata.json missing")
+    metadata = json.loads(zf.read("metadata.json"))
+    if not isinstance(metadata, dict):
+        raise ValueError("metadata.json must contain a JSON object")
+    metadata_warnings = metadata.get("warnings") or []
+    if not isinstance(metadata_warnings, list):
+        raise ValueError("metadata warnings must contain a JSON array")
+    warnings.extend(str(warning) for warning in metadata_warnings)
+    return metadata, warnings
+
+
+def _metadata_from_zip_bytes(data: bytes) -> tuple[dict[str, Any], list[str]]:
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            if "metadata.json" not in zf.namelist():
-                raise ValueError("metadata.json missing")
-            metadata = json.loads(zf.read("metadata.json"))
-            if not isinstance(metadata, dict):
-                raise ValueError("metadata.json must contain a JSON object")
-            metadata_warnings = metadata.get("warnings") or []
-            if not isinstance(metadata_warnings, list):
-                raise ValueError("metadata warnings must contain a JSON array")
-            warnings.extend(str(warning) for warning in metadata_warnings)
-            return metadata, warnings
+            return _metadata_from_zip(zf)
     except (RuntimeError, NotImplementedError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -610,8 +622,7 @@ def _metadata_from_zip_bytes(data: bytes) -> tuple[dict[str, Any], list[str]]:
         )
 
 
-def preview_backup_bytes(data: bytes) -> BackupPreview:
-    metadata, warnings = _metadata_from_zip_bytes(data)
+def _preview_from_metadata(metadata: dict[str, Any], warnings: list[str]) -> BackupPreview:
     export_date = _parse_dt(metadata.get("export_date"))
     workspace_id = None
     if metadata.get("workspace_id"):
@@ -649,10 +660,16 @@ def preview_backup_bytes(data: bytes) -> BackupPreview:
         ) from exc
 
 
+def preview_backup_bytes(data: bytes) -> BackupPreview:
+    metadata, warnings = _metadata_from_zip_bytes(data)
+    return _preview_from_metadata(metadata, warnings)
+
+
 def _item_from_path(path: Path) -> BackupItem | None:
     try:
-        data = path.read_bytes()
-        preview = preview_backup_bytes(data)
+        with zipfile.ZipFile(path) as zf:
+            metadata, warnings = _metadata_from_zip(zf)
+        preview = _preview_from_metadata(metadata, warnings)
         stat = path.stat()
     except Exception:
         return None
@@ -673,12 +690,16 @@ async def list_stored_backups(
     workspace_id: uuid.UUID,
 ) -> list[BackupItem]:
     dest = _backup_storage_dir()
-    items = []
-    for path in dest.glob(f"{BACKUP_PREFIX}-*.zip"):
-        item = _item_from_path(path)
-        if item and item.workspace_id == workspace_id:
-            items.append(item)
-    return sorted(items, key=lambda item: item.created_at, reverse=True)
+
+    def scan() -> list[BackupItem]:
+        items = []
+        for path in dest.glob(f"{BACKUP_PREFIX}-*.zip"):
+            item = _item_from_path(path)
+            if item and item.workspace_id == workspace_id:
+                items.append(item)
+        return sorted(items, key=lambda item: item.created_at, reverse=True)
+
+    return await asyncio.to_thread(scan)
 
 
 async def _apply_retention(
@@ -693,11 +714,15 @@ async def _apply_retention(
     if config.retention_days:
         cutoff = _now() - timedelta(days=config.retention_days)
         to_delete.update(item.id for item in items if item.created_at < cutoff)
-    for backup_id in to_delete:
-        try:
-            _backup_path(backup_id).unlink(missing_ok=True)
-        except OSError:
-            pass
+
+    def delete_expired() -> None:
+        for backup_id in to_delete:
+            try:
+                _backup_path(backup_id).unlink(missing_ok=True)
+            except OSError:
+                pass
+
+    await asyncio.to_thread(delete_expired)
 
 
 async def create_stored_backup(
@@ -713,21 +738,22 @@ async def create_stored_backup(
     timestamp = _now().strftime("%Y%m%dT%H%M%SZ")
     backup_id = f"{BACKUP_PREFIX}-{_slug(workspace.name)}-{timestamp}-{uuid.uuid4().hex[:8]}"
     path = _backup_path(backup_id)
-    path.write_bytes(data)
+    await asyncio.to_thread(path.write_bytes, data)
 
     if update_schedule:
         config.last_run_at = _now()
         setting = await session.get(AppSetting, _config_key(workspace.id))
         if setting is None:
             setting = AppSetting(
-                key=_config_key(workspace.id), value=config.model_dump_json(exclude={"next_run_at"})
+                key=_config_key(workspace.id),
+                value=config.model_dump_json(exclude={"next_run_at", "storage_shared"}),
             )
             session.add(setting)
         else:
-            setting.value = config.model_dump_json(exclude={"next_run_at"})
+            setting.value = config.model_dump_json(exclude={"next_run_at", "storage_shared"})
         await session.commit()
     await _apply_retention(session, workspace.id, config)
-    item = _item_from_path(path)
+    item = await asyncio.to_thread(_item_from_path, path)
     if item is None:
         raise HTTPException(status_code=500, detail="Backup was created but could not be read")
     return item
@@ -741,8 +767,8 @@ async def get_stored_backup_bytes(
     path = _backup_path(backup_id)
     if not path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
-    data = path.read_bytes()
-    preview = preview_backup_bytes(data)
+    data = await asyncio.to_thread(path.read_bytes)
+    preview = await asyncio.to_thread(preview_backup_bytes, data)
     if preview.workspace_id != workspace_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
     return path.name, data
@@ -753,8 +779,25 @@ async def preview_stored_backup(
     workspace_id: uuid.UUID,
     backup_id: str,
 ) -> BackupPreview:
-    _, data = await get_stored_backup_bytes(session, workspace_id, backup_id)
-    return preview_backup_bytes(data)
+    path = _backup_path(backup_id)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+
+    def preview_path() -> BackupPreview:
+        with zipfile.ZipFile(path) as zf:
+            metadata, warnings = _metadata_from_zip(zf)
+        return _preview_from_metadata(metadata, warnings)
+
+    try:
+        preview = await asyncio.to_thread(preview_path)
+    except (zipfile.BadZipFile, OSError, json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid backup file: {exc}",
+        ) from exc
+    if preview.workspace_id != workspace_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Backup not found")
+    return preview
 
 
 def _read_json_file(zf: zipfile.ZipFile, name: str) -> list[dict[str, Any]]:
@@ -841,9 +884,12 @@ async def _clear_workspace_entities(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     names: list[str],
-) -> list[str]:
+    id_map: dict[str, str],
+) -> tuple[list[str], list[PreservedReference]]:
     name_set = set(names)
+    archived_ids = set(id_map)
     stale_storage_keys: list[str] = []
+    preserved_references: list[PreservedReference] = []
     attachment_models = []
     if "transaction_attachments" in name_set:
         attachment_models.append(TransactionAttachment)
@@ -857,8 +903,91 @@ async def _clear_workspace_entities(
         )
         stale_storage_keys.extend(result.scalars().all())
 
-    # Break nullable references when a configuration-only restore replaces
-    # referenced rows but leaves transaction data in place.
+    # Configuration-only restores replace referenced rows while leaving data
+    # entities in place. Preserve links to rows carried by the archive, clear
+    # the FKs for deletion, then restore the links after reinsertion.
+    transaction_fields: set[str] = set()
+    if "transactions" not in name_set:
+        if "categories" in name_set:
+            transaction_fields.add("category_id")
+        if "payees" in name_set:
+            transaction_fields.add("payee_id")
+        if "recurring_transactions" in name_set:
+            transaction_fields.add("recurring_transaction_id")
+        if "credit_card_bills" in name_set:
+            transaction_fields.add("bill_id")
+    if transaction_fields:
+        result = await session.execute(
+            select(Transaction).where(Transaction.workspace_id == workspace_id)
+        )
+        for transaction in result.scalars():
+            values = {
+                field: value
+                for field in transaction_fields
+                if (value := getattr(transaction, field)) is not None and str(value) in archived_ids
+            }
+            if values:
+                preserved_references.append(PreservedReference(Transaction, transaction.id, values))
+
+    preserve_invoice_payee = "payees" in name_set and "invoices" not in name_set
+    preserve_invoice_schedule = "invoice_schedules" in name_set and "invoices" not in name_set
+    if preserve_invoice_payee or preserve_invoice_schedule:
+        result = await session.execute(select(Invoice).where(Invoice.workspace_id == workspace_id))
+        for invoice in result.scalars():
+            values: dict[str, Any] = {}
+            if (
+                preserve_invoice_payee
+                and invoice.payee_id is not None
+                and str(invoice.payee_id) in archived_ids
+            ):
+                values["payee_id"] = invoice.payee_id
+            if (
+                preserve_invoice_schedule
+                and invoice.schedule_id is not None
+                and str(invoice.schedule_id) in archived_ids
+            ):
+                values.update(
+                    schedule_id=invoice.schedule_id,
+                    sequence=invoice.sequence,
+                    period_start=invoice.period_start,
+                    period_end=invoice.period_end,
+                )
+            if values:
+                preserved_references.append(PreservedReference(Invoice, invoice.id, values))
+
+    if "payees" in name_set and "invoice_schedules" not in name_set:
+        result = await session.execute(
+            select(InvoiceSchedule).where(InvoiceSchedule.workspace_id == workspace_id)
+        )
+        for schedule in result.scalars():
+            if schedule.payee_id is not None and str(schedule.payee_id) in archived_ids:
+                preserved_references.append(
+                    PreservedReference(
+                        InvoiceSchedule,
+                        schedule.id,
+                        {"payee_id": schedule.payee_id},
+                    )
+                )
+
+    product_fields: set[str] = set()
+    if "invoice_lines" not in name_set:
+        if "products" in name_set:
+            product_fields.add("product_id")
+        if "product_prices" in name_set:
+            product_fields.add("price_id")
+    if product_fields:
+        result = await session.execute(
+            select(InvoiceLine).where(InvoiceLine.workspace_id == workspace_id)
+        )
+        for line in result.scalars():
+            values = {
+                field: value
+                for field in product_fields
+                if (value := getattr(line, field)) is not None and str(value) in archived_ids
+            }
+            if values:
+                preserved_references.append(PreservedReference(InvoiceLine, line.id, values))
+
     if "categories" in name_set and "transactions" not in name_set:
         await session.execute(
             update(Transaction)
@@ -874,6 +1003,12 @@ async def _clear_workspace_entities(
     if "payees" in name_set and "invoices" not in name_set:
         await session.execute(
             update(Invoice).where(Invoice.workspace_id == workspace_id).values(payee_id=None)
+        )
+    if "invoice_schedules" in name_set and "invoices" not in name_set:
+        await session.execute(
+            update(Invoice)
+            .where(Invoice.workspace_id == workspace_id, Invoice.schedule_id.is_not(None))
+            .values(schedule_id=None, sequence=None, period_start=None, period_end=None)
         )
     if "payees" in name_set and "invoice_schedules" not in name_set:
         await session.execute(
@@ -959,7 +1094,18 @@ async def _clear_workspace_entities(
         await session.execute(
             delete(dynamic_model).where(dynamic_model.workspace_id == workspace_id)
         )
-    return list(dict.fromkeys(stale_storage_keys))
+    return list(dict.fromkeys(stale_storage_keys)), preserved_references
+
+
+async def _restore_preserved_references(
+    session: AsyncSession,
+    references: list[PreservedReference],
+) -> None:
+    grouped: dict[type, list[dict[str, Any]]] = {}
+    for reference in references:
+        grouped.setdefault(reference.model, []).append({"id": reference.row_id, **reference.values})
+    for model, rows in grouped.items():
+        await session.execute(update(model), rows)
 
 
 async def _insert_associations(
@@ -1037,6 +1183,7 @@ async def restore_backup_bytes(
             # starts deleting rows. This also validates that each payload is a list.
             id_map = _build_id_map(zf, names, remap=remap)
             stale_storage_keys: list[str] = []
+            preserved_references: list[PreservedReference] = []
             if mode == BackupRestoreMode.new_workspace:
                 user = await session.get(User, target_user_id)
                 if user is None:
@@ -1056,8 +1203,11 @@ async def restore_backup_bytes(
                 )
             else:
                 target_workspace = current_workspace
-                stale_storage_keys = await _clear_workspace_entities(
-                    session, target_workspace.id, names
+                stale_storage_keys, preserved_references = await _clear_workspace_entities(
+                    session,
+                    target_workspace.id,
+                    names,
+                    id_map,
                 )
 
             uploaded_logo_ids: set[str] = set()
@@ -1184,6 +1334,7 @@ async def restore_backup_bytes(
                     count += 1
                 restored_counts[name] = count
 
+            await _restore_preserved_references(session, preserved_references)
             await session.refresh(target_workspace)
             response = BackupRestoreResult(
                 workspace_id=target_workspace.id,

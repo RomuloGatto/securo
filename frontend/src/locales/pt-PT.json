@@ -2461,6 +2461,7 @@
     "noBackupSelected": "Escolha um backup armazenado primeiro.",
     "configSaved": "Configurações de backup salvas",
     "configError": "Não foi possível salvar as configurações de backup",
+    "invalidRetention": "Introduza um número inteiro positivo.",
     "runSuccess": "Backup criado",
     "runError": "Não foi possível criar o backup",
     "previewError": "Não foi possível ler o arquivo de backup",

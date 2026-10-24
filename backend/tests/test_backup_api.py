@@ -4,6 +4,7 @@ import uuid
 import zipfile
 from datetime import date
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from fastapi import HTTPException
@@ -12,9 +13,13 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.models.category import Category
 from app.models.invoice import Invoice, InvoiceLine, InvoiceSettings
 from app.models.invoice_attachment import InvoiceAttachment
+from app.models.invoice_schedule import InvoiceSchedule
+from app.models.payee import Payee
 from app.models.product import Product, ProductPrice
+from app.models.recurring_transaction import RecurringTransaction
 from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
@@ -179,6 +184,37 @@ async def test_run_list_preview_and_download_stored_backup(
         metadata = json.loads(zf.read("metadata.json"))
         assert metadata["content"] == "both"
         assert "transactions.json" in zf.namelist()
+
+
+@pytest.mark.asyncio
+async def test_list_and_preview_read_only_archive_metadata(
+    client: AsyncClient,
+    auth_headers,
+    backup_dir,
+    monkeypatch,
+):
+    run_resp = await client.post(
+        "/api/backups/run",
+        json={"content": "configuration"},
+        headers=auth_headers,
+    )
+    assert run_resp.status_code == 200
+    backup_id = run_resp.json()["id"]
+
+    def fail_full_read(_path: Path) -> bytes:
+        raise AssertionError("list/preview must not read the entire backup archive")
+
+    monkeypatch.setattr(Path, "read_bytes", fail_full_read)
+    list_resp = await client.get("/api/backups", headers=auth_headers)
+    assert list_resp.status_code == 200
+    assert [item["id"] for item in list_resp.json()] == [backup_id]
+
+    preview_resp = await client.get(
+        f"/api/backups/{backup_id}/preview",
+        headers=auth_headers,
+    )
+    assert preview_resp.status_code == 200
+    assert preview_resp.json()["content"] == "configuration"
 
 
 @pytest.mark.asyncio
@@ -395,6 +431,146 @@ async def test_current_restore_only_replaces_entities_present_in_archive(
     assert await session.get(Rule, rule_id) is not None
     assert "rules" not in result.restored_counts
     assert any("rules" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_configuration_restore_preserves_data_references(
+    session: AsyncSession,
+    test_user,
+    test_workspace: Workspace,
+    test_account,
+    test_transactions,
+):
+    category = Category(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Preserved category",
+    )
+    payee = Payee(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Preserved payee",
+    )
+    product = Product(
+        workspace_id=test_workspace.id,
+        user_id=test_user.id,
+        name="Preserved product",
+    )
+    session.add_all([category, payee, product])
+    await session.flush()
+
+    recurring = RecurringTransaction(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        account_id=test_account.id,
+        category_id=category.id,
+        description="Monthly service",
+        amount=Decimal("25.00"),
+        currency="USD",
+        type="debit",
+        frequency="monthly",
+        start_date=date(2026, 1, 1),
+        next_occurrence=date(2026, 11, 1),
+    )
+    schedule = InvoiceSchedule(
+        workspace_id=test_workspace.id,
+        user_id=test_user.id,
+        payee_id=payee.id,
+        name="Monthly retainer",
+        frequency="monthly",
+        start_date=date(2026, 1, 1),
+        currency="USD",
+    )
+    price = ProductPrice(
+        product_id=product.id,
+        workspace_id=test_workspace.id,
+        currency="USD",
+        unit_price=Decimal("50.00"),
+    )
+    session.add_all([recurring, schedule, price])
+    await session.flush()
+
+    transaction = test_transactions[0]
+    transaction.category_id = category.id
+    transaction.payee_id = payee.id
+    transaction.recurring_transaction_id = recurring.id
+    invoice = Invoice(
+        workspace_id=test_workspace.id,
+        user_id=test_user.id,
+        payee_id=payee.id,
+        issue_date=date(2026, 10, 1),
+        due_date=date(2026, 10, 31),
+        currency="USD",
+        total=Decimal("50.00"),
+        schedule_id=schedule.id,
+        sequence=10,
+        period_start=date(2026, 10, 1),
+        period_end=date(2026, 10, 31),
+    )
+    session.add(invoice)
+    await session.flush()
+    line = InvoiceLine(
+        invoice_id=invoice.id,
+        workspace_id=test_workspace.id,
+        description="Monthly retainer",
+        unit_price=Decimal("50.00"),
+        total=Decimal("50.00"),
+        product_id=product.id,
+        price_id=price.id,
+    )
+    session.add(line)
+    await session.flush()
+    transaction_id = transaction.id
+    invoice_id = invoice.id
+    line_id = line.id
+    schedule_id = schedule.id
+    category_id = category.id
+    payee_id = payee.id
+    recurring_id = recurring.id
+    product_id = product.id
+    price_id = price.id
+    await session.commit()
+
+    data = await backup_service.build_backup_zip(
+        session,
+        test_workspace,
+        content=backup_service.BackupContent.configuration,
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert "transactions.json" not in zf.namelist()
+        assert "invoices.json" not in zf.namelist()
+        assert "invoice_lines.json" not in zf.namelist()
+
+    await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.configuration,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+
+    session.expire_all()
+    restored_transaction = await session.get(Transaction, transaction_id)
+    restored_invoice = await session.get(Invoice, invoice_id)
+    restored_line = await session.get(InvoiceLine, line_id)
+    restored_schedule = await session.get(InvoiceSchedule, schedule_id)
+    assert restored_transaction is not None
+    assert restored_transaction.category_id == category_id
+    assert restored_transaction.payee_id == payee_id
+    assert restored_transaction.recurring_transaction_id == recurring_id
+    assert restored_invoice is not None
+    assert restored_invoice.payee_id == payee_id
+    assert restored_invoice.schedule_id == schedule_id
+    assert restored_invoice.sequence == 10
+    assert restored_invoice.period_start == date(2026, 10, 1)
+    assert restored_invoice.period_end == date(2026, 10, 31)
+    assert restored_line is not None
+    assert restored_line.product_id == product_id
+    assert restored_line.price_id == price_id
+    assert restored_schedule is not None
+    assert restored_schedule.payee_id == payee_id
 
 
 @pytest.mark.asyncio

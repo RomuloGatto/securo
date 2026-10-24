@@ -25,6 +25,7 @@ import {
 import { useWorkspace } from '@/contexts/workspace-context'
 import { useDateLocale } from '@/hooks/use-display-locale'
 import { extractApiErrorAsync } from '@/lib/api-errors'
+import { parsePositiveInteger } from '@/lib/backup-validation'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -178,13 +179,18 @@ export default function BackupPage() {
   }
 
   const saveConfigMutation = useMutation({
-    mutationFn: () => backupApi.updateConfig({
-      scheduled_enabled: scheduledEnabled,
-      schedule,
-      content: configContent,
-      retention_count: Number(retentionCount) || 10,
-      retention_days: retentionDays.trim() ? Number(retentionDays) : null,
-    }),
+    mutationFn: () => {
+      const invalidRetention = t('backup.invalidRetention')
+      return backupApi.updateConfig({
+        scheduled_enabled: scheduledEnabled,
+        schedule,
+        content: configContent,
+        retention_count: parsePositiveInteger(retentionCount, invalidRetention),
+        retention_days: retentionDays.trim()
+          ? parsePositiveInteger(retentionDays, invalidRetention)
+          : null,
+      })
+    },
     onSuccess: () => {
       toast.success(t('backup.configSaved'))
       invalidateBackups()
@@ -447,11 +453,11 @@ export default function BackupPage() {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.retentionCount')}</Label>
-              <Input className="h-9 text-sm" value={retentionCount} onChange={(e) => setRetentionCount(e.target.value)} inputMode="numeric" />
+              <Input className="h-9 text-sm" value={retentionCount} onChange={(e) => setRetentionCount(e.target.value)} type="number" min={1} max={200} step={1} inputMode="numeric" />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.retentionDays')}</Label>
-              <Input className="h-9 text-sm" value={retentionDays} onChange={(e) => setRetentionDays(e.target.value)} inputMode="numeric" placeholder={t('backup.optional')} />
+              <Input className="h-9 text-sm" value={retentionDays} onChange={(e) => setRetentionDays(e.target.value)} type="number" min={1} max={3650} step={1} inputMode="numeric" placeholder={t('backup.optional')} />
             </div>
           </div>
           <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">

@@ -2457,6 +2457,7 @@
     "restore": "Restaurar",
     "previewError": "Não foi possível ler o arquivo de backup",
     "configError": "Não foi possível salvar as configurações de backup",
+    "invalidRetention": "Informe um número inteiro positivo.",
     "unknownWorkspace": "Workspace desconhecido",
     "running": "Executando…",
     "emptyStored": "Nenhum backup armazenado ainda. Execute agora ou habilite o agendamento.",

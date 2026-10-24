@@ -2447,6 +2447,7 @@
     "restore": "復元",
     "previewError": "バックアップファイルを読み込めませんでした",
     "configError": "バックアップ設定を保存できませんでした",
+    "invalidRetention": "正の整数を入力してください。",
     "unknownWorkspace": "不明なワークスペース",
     "running": "実行中…",
     "emptyStored": "保存済みのバックアップはまだありません。今すぐ実行するか、スケジュールを有効にしてください。",

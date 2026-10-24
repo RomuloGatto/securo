@@ -2595,6 +2595,7 @@
     "restore": "Obnoviť",
     "previewError": "Súbor zálohy sa nepodarilo načítať",
     "configError": "Nastavenia zálohovania sa nepodarilo uložiť",
+    "invalidRetention": "Zadajte kladné celé číslo.",
     "unknownWorkspace": "Neznámy pracovný priestor",
     "running": "Prebieha…",
     "emptyStored": "Zatiaľ nie sú uložené žiadne zálohy. Spusti zálohovanie teraz alebo povoľ plán.",
