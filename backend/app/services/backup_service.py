@@ -208,13 +208,21 @@ MODEL_SPECS: dict[str, EntitySpec] = {
     "goals": EntitySpec("goals", Goal),
 }
 
-WORKSPACE_MODELS_BY_TABLE = {
-    spec.model.__table__.name: spec.model
-    for spec in MODEL_SPECS.values()
-    if spec.model is not None
-    and "id" in spec.model.__table__.columns
-    and "workspace_id" in spec.model.__table__.columns
-}
+
+def _workspace_models_by_table() -> dict[str, Any]:
+    models: dict[str, Any] = {}
+    for spec in MODEL_SPECS.values():
+        model: Any = spec.model
+        if (
+            model is not None
+            and "id" in model.__table__.columns
+            and "workspace_id" in model.__table__.columns
+        ):
+            models[model.__table__.name] = model
+    return models
+
+
+WORKSPACE_MODELS_BY_TABLE = _workspace_models_by_table()
 GROUPING_FIELDS_BY_ENTITY = {
     "transactions": ("transfer_pair_id",),
     "reconciliation_suggestions": ("group_id",),
@@ -853,7 +861,7 @@ def _build_id_map(
     for name in names:
         if name in ("collection_accounts", "collection_asset_groups"):
             continue
-        model = MODEL_SPECS[name].model
+        model: Any = MODEL_SPECS[name].model
         assert model is not None
         table_name = model.__table__.name
         table_map = by_table.setdefault(table_name, {})
@@ -896,7 +904,10 @@ async def _current_workspace_reference_scope(
 ) -> tuple[dict[str, set[str]], set[str]]:
     owned_ids: dict[str, set[str]] = {}
     for table_name, model in WORKSPACE_MODELS_BY_TABLE.items():
-        result = await session.execute(select(model.id).where(model.workspace_id == workspace_id))
+        dynamic_model: Any = model
+        result = await session.execute(
+            select(dynamic_model.id).where(dynamic_model.workspace_id == workspace_id)
+        )
         owned_ids[table_name] = {str(value) for value in result.scalars()}
 
     member_result = await session.execute(
