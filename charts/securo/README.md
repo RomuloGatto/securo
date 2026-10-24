@@ -22,6 +22,10 @@ Since the Backend, Celery Worker, Celery Beat, and MCP Server share persistent f
 **If your cluster spans multiple nodes, you MUST use a StorageClass that supports `ReadWriteMany` (RWX) access mode (e.g., NFS, CephFS, or Longhorn RWX).**
 If your storage only supports `ReadWriteOnce` (RWO), you must restrict all Securo pods to run on a single node (using `nodeSelector` or `podAffinity`) but that is an antipattern in Kubernetes.
 
+Managed backup persistence is opt-in. Enable it with
+`--set persistence.backups.enabled=true`; without that value, stored and
+scheduled backup ZIPs use pod-local storage and do not survive pod replacement.
+
 ## Quickstart
 
 If you want to install the latest official release from the GitHub Container Registry (GHCR):

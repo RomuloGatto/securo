@@ -6,6 +6,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from fastapi import HTTPException
 from httpx import AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,7 +15,9 @@ from app.models.account import Account
 from app.models.invoice import Invoice, InvoiceLine, InvoiceSettings
 from app.models.invoice_attachment import InvoiceAttachment
 from app.models.product import Product, ProductPrice
+from app.models.rule import Rule
 from app.models.transaction import Transaction
+from app.models.transaction_attachment import TransactionAttachment
 from app.models.workspace import Workspace, WorkspaceMember
 from app.providers import get_storage_provider
 from app.services import backup_service, invoice_logo_service
@@ -82,6 +85,14 @@ async def test_backup_config_roundtrip(client: AsyncClient, auth_headers, backup
     assert body["retention_count"] == 3
     assert body["retention_days"] == 30
 
+    clear_days_resp = await client.put(
+        "/api/backups/config",
+        json={"retention_days": None},
+        headers=auth_headers,
+    )
+    assert clear_days_resp.status_code == 200
+    assert clear_days_resp.json()["retention_days"] is None
+
     rejected_resp = await client.put(
         "/api/backups/config",
         json={"destination_path": "/tmp/should-not-be-configurable"},
@@ -141,6 +152,34 @@ async def test_preview_uploaded_backup(client: AsyncClient, auth_headers, test_a
     assert body["valid"] is True
     assert body["content"] == "data"
     assert body["entity_counts"]["accounts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_preview_rejects_encrypted_and_non_object_backups(client: AsyncClient, auth_headers):
+    metadata = {
+        "format_version": backup_service.FORMAT_VERSION,
+        "content": "both",
+        "entity_counts": {},
+    }
+    encrypted = backup_service.build_backup_archive(
+        {"metadata.json": metadata}, password="correct horse battery staple"
+    )
+    encrypted_resp = await client.post(
+        "/api/backups/preview-upload",
+        files={"file": ("encrypted.zip", encrypted, "application/zip")},
+        headers=auth_headers,
+    )
+    assert encrypted_resp.status_code == 400
+    assert "encrypted backups cannot be restored" in encrypted_resp.json()["detail"].lower()
+
+    non_object = backup_service.build_backup_archive({"metadata.json": []})
+    non_object_resp = await client.post(
+        "/api/backups/preview-upload",
+        files={"file": ("invalid.zip", non_object, "application/zip")},
+        headers=auth_headers,
+    )
+    assert non_object_resp.status_code == 400
+    assert "json object" in non_object_resp.json()["detail"].lower()
 
 
 @pytest.mark.asyncio
@@ -235,6 +274,111 @@ async def test_restore_stored_backup_to_current_workspace_requires_confirmation_
         await session.execute(select(Account).where(Account.workspace_id == workspace_id))
     ).scalar_one()
     assert account.connection_id is None
+
+
+@pytest.mark.asyncio
+async def test_current_restore_only_replaces_entities_present_in_archive(
+    session: AsyncSession,
+    test_user,
+    test_workspace: Workspace,
+    test_account,
+    test_transactions,
+):
+    rule = Rule(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Keep this rule",
+        conditions_op="and",
+        conditions=[],
+        actions=[],
+    )
+    session.add(rule)
+    await session.commit()
+    rule_id = rule.id
+
+    data = await backup_service.build_backup_zip(
+        session,
+        test_workspace,
+        content=backup_service.BackupContent.data,
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        assert "rules.json" not in zf.namelist()
+
+    result = await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+
+    session.expire_all()
+    assert await session.get(Rule, rule_id) is not None
+    assert "rules" not in result.restored_counts
+    assert any("rules" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
+async def test_failed_current_restore_keeps_existing_attachment_file(
+    session: AsyncSession,
+    test_user,
+    test_workspace: Workspace,
+    test_account,
+    test_transactions,
+):
+    storage = get_storage_provider()
+    transaction = test_transactions[0]
+    storage_key = f"{test_workspace.id}/{transaction.id}/before-restore.txt"
+    attachment_data = b"must survive rollback"
+    stored = await storage.upload(storage_key, attachment_data, "text/plain")
+    attachment = TransactionAttachment(
+        transaction_id=transaction.id,
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        filename="before-restore.txt",
+        storage_key=stored.storage_key,
+        content_type=stored.content_type,
+        size=stored.size,
+    )
+    session.add(attachment)
+    await session.commit()
+    attachment_id = attachment.id
+
+    valid_data = await backup_service.build_backup_zip(
+        session,
+        test_workspace,
+        content=backup_service.BackupContent.data,
+    )
+    corrupted = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(valid_data)) as source,
+        zipfile.ZipFile(corrupted, "w", zipfile.ZIP_DEFLATED) as target,
+    ):
+        for info in source.infolist():
+            payload = source.read(info.filename)
+            if info.filename == "accounts.json":
+                rows = json.loads(payload)
+                rows[0]["id"] = "not-a-uuid"
+                payload = json.dumps(rows).encode()
+            target.writestr(info, payload)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await backup_service.restore_backup_bytes(
+            session,
+            data=corrupted.getvalue(),
+            target_user_id=test_user.id,
+            current_workspace=test_workspace,
+            content=backup_service.BackupContent.data,
+            mode=backup_service.BackupRestoreMode.current_workspace,
+            confirmation="RESTORE",
+        )
+
+    assert exc_info.value.status_code == 400
+    session.expire_all()
+    assert await session.get(TransactionAttachment, attachment_id) is not None
+    assert await storage.download(storage_key) == attachment_data
 
 
 @pytest.mark.asyncio

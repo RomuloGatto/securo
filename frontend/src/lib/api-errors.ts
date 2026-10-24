@@ -1,6 +1,8 @@
+const DEFAULT_ERROR = 'An unexpected error occurred'
+
 export function extractApiError(
   error: unknown,
-  fallback = 'An unexpected error occurred',
+  fallback = DEFAULT_ERROR,
 ): string {
   if (
     error &&
@@ -32,4 +34,28 @@ export function extractApiError(
     }
   }
   return fallback
+}
+
+/**
+ * Extract an API error when Axios was configured with responseType: "blob".
+ * Axios keeps error responses as Blob objects in that mode, even when the
+ * server returned FastAPI JSON. Local errors retain their own message.
+ */
+export async function extractApiErrorAsync(
+  error: unknown,
+  fallback = DEFAULT_ERROR,
+): Promise<string> {
+  const response = (error as { response?: { data?: unknown } } | null)?.response
+  const localFallback = !response && error instanceof Error ? error.message : fallback
+  const data = response?.data
+
+  if (!(data instanceof Blob)) return extractApiError(error, localFallback)
+
+  try {
+    const text = await data.text()
+    const decoded: unknown = JSON.parse(text)
+    return extractApiError({ response: { data: decoded } }, fallback)
+  } catch {
+    return localFallback
+  }
 }

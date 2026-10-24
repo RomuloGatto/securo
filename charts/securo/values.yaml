@@ -184,7 +184,8 @@ persistence:
     storageClass: ""
     accessMode: ReadWriteOnce
   backups:
-    enabled: true
+    # Opt in when managed/scheduled backups should survive pod replacement.
+    enabled: false
     size: 5Gi
     storageClass: ""
     accessMode: ReadWriteOnce

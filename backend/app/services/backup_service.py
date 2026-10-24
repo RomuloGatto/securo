@@ -434,7 +434,13 @@ async def save_backup_config(
 ) -> BackupConfig:
     current = await get_backup_config(session, workspace_id)
     data = current.model_dump(mode="json")
-    data.update({k: v for k, v in updates.items() if v is not None})
+    data.update(
+        {
+            key: value
+            for key, value in updates.items()
+            if value is not None or key == "retention_days"
+        }
+    )
     cfg = BackupConfig(**data)
     cfg.next_run_at = _next_run(cfg.last_run_at, cfg.schedule)
     setting = await session.get(AppSetting, _config_key(workspace_id))
@@ -569,8 +575,21 @@ def _metadata_from_zip_bytes(data: bytes) -> tuple[dict[str, Any], list[str]]:
             if "metadata.json" not in zf.namelist():
                 raise ValueError("metadata.json missing")
             metadata = json.loads(zf.read("metadata.json"))
-            warnings.extend(metadata.get("warnings") or [])
+            if not isinstance(metadata, dict):
+                raise ValueError("metadata.json must contain a JSON object")
+            metadata_warnings = metadata.get("warnings") or []
+            if not isinstance(metadata_warnings, list):
+                raise ValueError("metadata warnings must contain a JSON array")
+            warnings.extend(str(warning) for warning in metadata_warnings)
             return metadata, warnings
+    except (RuntimeError, NotImplementedError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Encrypted backups cannot be restored here. "
+                f"Upload an unencrypted Securo backup ZIP: {exc}"
+            ),
+        )
     except (zipfile.BadZipFile, OSError, json.JSONDecodeError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid backup file: {exc}"
@@ -592,6 +611,12 @@ def preview_backup_bytes(data: bytes) -> BackupPreview:
     except ValueError:
         backup_content = BackupContent.both
         warnings.append(f"Unknown backup content '{content}', treating as both")
+    entity_counts = metadata.get("entity_counts") or {}
+    if not isinstance(entity_counts, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid backup file: entity_counts must contain a JSON object",
+        )
     return BackupPreview(
         valid=True,
         format_version=str(metadata.get("format_version") or "unknown"),
@@ -599,7 +624,7 @@ def preview_backup_bytes(data: bytes) -> BackupPreview:
         workspace_id=workspace_id,
         workspace_name=metadata.get("workspace_name"),
         content=backup_content,
-        entity_counts=metadata.get("entity_counts") or {},
+        entity_counts=entity_counts,
         warnings=warnings,
     )
 
@@ -718,8 +743,14 @@ def _read_json_file(zf: zipfile.ZipFile, name: str) -> list[dict[str, Any]]:
         return []
     raw = json.loads(zf.read(filename))
     if not isinstance(raw, list):
-        return []
+        raise ValueError(f"{filename} must contain a JSON array")
     return [row for row in raw if isinstance(row, dict)]
+
+
+def _archive_entity_names(zf: zipfile.ZipFile, selected_names: list[str]) -> list[str]:
+    """Return only selected entities represented by files in this archive."""
+    members = set(zf.namelist())
+    return [name for name in selected_names if f"{name}.json" in members]
 
 
 def _build_id_map(
@@ -790,8 +821,9 @@ async def _clear_workspace_entities(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     names: list[str],
-) -> None:
+) -> list[str]:
     name_set = set(names)
+    stale_storage_keys: list[str] = []
     attachment_models = []
     if "transaction_attachments" in name_set:
         attachment_models.append(TransactionAttachment)
@@ -803,12 +835,7 @@ async def _clear_workspace_entities(
                 attachment_model.workspace_id == workspace_id
             )
         )
-        storage = get_storage_provider()
-        for key in result.scalars().all():
-            try:
-                await storage.delete(key)
-            except Exception:
-                pass
+        stale_storage_keys.extend(result.scalars().all())
 
     # Break nullable references when a configuration-only restore replaces
     # referenced rows but leaves transaction data in place.
@@ -912,6 +939,7 @@ async def _clear_workspace_entities(
         await session.execute(
             delete(dynamic_model).where(dynamic_model.workspace_id == workspace_id)
         )
+    return list(dict.fromkeys(stale_storage_keys))
 
 
 async def _insert_associations(
@@ -948,7 +976,7 @@ async def restore_backup_bytes(
         )
 
     preview = preview_backup_bytes(data)
-    names = entity_names_for_content(content)
+    selected_names = entity_names_for_content(content)
     warnings = list(preview.warnings)
     restored_counts: dict[str, int] = {}
 
@@ -958,7 +986,18 @@ async def restore_backup_bytes(
 
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            names = _archive_entity_names(zf, selected_names)
+            missing_names = [name for name in selected_names if name not in names]
+            if missing_names:
+                warnings.append(
+                    "Skipped entities that are not present in this backup: "
+                    + ", ".join(missing_names)
+                )
             remap = mode == BackupRestoreMode.new_workspace
+            # Parse every selected entity file before a current-workspace restore
+            # starts deleting rows. This also validates that each payload is a list.
+            id_map = _build_id_map(zf, names, remap=remap)
+            stale_storage_keys: list[str] = []
             if mode == BackupRestoreMode.new_workspace:
                 user = await session.get(User, target_user_id)
                 if user is None:
@@ -978,9 +1017,10 @@ async def restore_backup_bytes(
                 )
             else:
                 target_workspace = current_workspace
-                await _clear_workspace_entities(session, target_workspace.id, names)
+                stale_storage_keys = await _clear_workspace_entities(
+                    session, target_workspace.id, names
+                )
 
-            id_map = _build_id_map(zf, names, remap=remap)
             storage = get_storage_provider()
             uploaded_logo_ids: set[str] = set()
             for name in RESTORE_ORDER:
@@ -1100,9 +1140,8 @@ async def restore_backup_bytes(
                     count += 1
                 restored_counts[name] = count
 
-            await session.commit()
             await session.refresh(target_workspace)
-            return BackupRestoreResult(
+            response = BackupRestoreResult(
                 workspace_id=target_workspace.id,
                 workspace_name=target_workspace.name,
                 mode=mode,
@@ -1110,6 +1149,15 @@ async def restore_backup_bytes(
                 restored_counts=restored_counts,
                 warnings=warnings,
             )
+            await session.commit()
+            for key in stale_storage_keys:
+                try:
+                    await storage.delete(key)
+                except Exception:
+                    response.warnings.append(
+                        f"Old attachment file could not be deleted after restore: {key}"
+                    )
+            return response
     except HTTPException:
         await session.rollback()
         raise

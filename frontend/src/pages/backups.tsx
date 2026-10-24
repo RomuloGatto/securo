@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { TFunction } from 'i18next'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import {
@@ -22,6 +23,8 @@ import {
   type BackupRestoreMode,
 } from '@/lib/api'
 import { useWorkspace } from '@/contexts/workspace-context'
+import { useDateLocale } from '@/hooks/use-display-locale'
+import { extractApiErrorAsync } from '@/lib/api-errors'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -53,11 +56,8 @@ import {
 const CONTENT_OPTIONS: BackupContent[] = ['both', 'configuration', 'data']
 const RESTORE_MODES: BackupRestoreMode[] = ['new_workspace', 'current_workspace']
 
-function errorMessage(error: unknown, fallback: string): string {
-  return (
-    (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
-    (error instanceof Error ? error.message : fallback)
-  )
+function showError(error: unknown, fallback: string): void {
+  void extractApiErrorAsync(error, fallback).then((message) => toast.error(message))
 }
 
 function formatBytes(value: number): string {
@@ -72,18 +72,23 @@ function formatBytes(value: number): string {
   return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`
 }
 
-function countSummary(counts: Record<string, number>): string {
+function countSummary(counts: Record<string, number>, t: TFunction): string {
   const important = ['accounts', 'transactions', 'categories', 'rules', 'budgets', 'goals']
     .map((key) => [key, counts[key] ?? 0] as const)
     .filter(([, count]) => count > 0)
-  if (!important.length) return '0 items'
-  return important.map(([key, count]) => `${count} ${key.replace(/_/g, ' ')}`).join(' · ')
+  if (!important.length) return t('backup.counts.empty')
+  return important
+    .map(([key, count]) => t(`backup.counts.${key}`, { count }))
+    .join(' · ')
 }
 
-function formatDate(value: string | null): string {
+function formatDate(value: string | null, locale: string): string {
   if (!value) return '—'
   try {
-    return new Date(value).toLocaleString()
+    return new Intl.DateTimeFormat(locale, {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+    }).format(new Date(value))
   } catch {
     return value
   }
@@ -99,14 +104,15 @@ function modeLabel(mode: BackupRestoreMode, t: (key: string) => string): string 
 
 function PreviewSummary({ preview }: { preview: BackupPreview }) {
   const { t } = useTranslation()
+  const dateLocale = useDateLocale()
   return (
     <div className="rounded-lg border bg-muted/30 p-3 text-sm space-y-2">
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary">{contentLabel(preview.content, t)}</Badge>
         <span className="font-medium">{preview.workspace_name || t('backup.unknownWorkspace')}</span>
-        <span className="text-muted-foreground">{formatDate(preview.export_date)}</span>
+        <span className="text-muted-foreground">{formatDate(preview.export_date, dateLocale)}</span>
       </div>
-      <p className="text-muted-foreground">{countSummary(preview.entity_counts)}</p>
+      <p className="text-muted-foreground">{countSummary(preview.entity_counts, t)}</p>
       {preview.warnings.length > 0 && (
         <div className="space-y-1 text-amber-700 dark:text-amber-300">
           {preview.warnings.map((warning) => (
@@ -123,6 +129,7 @@ function PreviewSummary({ preview }: { preview: BackupPreview }) {
 
 export default function BackupPage() {
   const { t } = useTranslation()
+  const dateLocale = useDateLocale()
   const queryClient = useQueryClient()
   const { refresh: refreshWorkspaces } = useWorkspace()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -182,7 +189,7 @@ export default function BackupPage() {
       toast.success(t('backup.configSaved'))
       invalidateBackups()
     },
-    onError: (error) => toast.error(errorMessage(error, t('backup.configError'))),
+    onError: (error) => showError(error, t('backup.configError')),
   })
 
   const runMutation = useMutation({
@@ -191,18 +198,18 @@ export default function BackupPage() {
       toast.success(t('backup.runSuccess'))
       invalidateBackups()
     },
-    onError: (error) => toast.error(errorMessage(error, t('backup.runError'))),
+    onError: (error) => showError(error, t('backup.runError')),
   })
 
   const downloadNowMutation = useMutation({
     mutationFn: () => backupApi.download(runContent),
     onSuccess: () => toast.success(t('backup.success')),
-    onError: (error) => toast.error(errorMessage(error, t('backup.error'))),
+    onError: (error) => showError(error, t('backup.error')),
   })
 
   const downloadStoredMutation = useMutation({
     mutationFn: (backupId: string) => backupApi.downloadStored(backupId),
-    onError: (error) => toast.error(errorMessage(error, t('backup.error'))),
+    onError: (error) => showError(error, t('backup.error')),
   })
 
   const previewUploadMutation = useMutation({
@@ -213,7 +220,7 @@ export default function BackupPage() {
     },
     onError: (error) => {
       setUploadPreview(null)
-      toast.error(errorMessage(error, t('backup.previewError')))
+      showError(error, t('backup.previewError'))
     },
   })
 
@@ -235,7 +242,7 @@ export default function BackupPage() {
       await refreshWorkspaces()
       invalidateBackups()
     },
-    onError: (error) => toast.error(errorMessage(error, t('backup.restoreError'))),
+    onError: (error) => showError(error, t('backup.restoreError')),
   })
 
   const restoreStoredMutation = useMutation({
@@ -254,7 +261,7 @@ export default function BackupPage() {
       await refreshWorkspaces()
       invalidateBackups()
     },
-    onError: (error) => toast.error(errorMessage(error, t('backup.restoreError'))),
+    onError: (error) => showError(error, t('backup.restoreError')),
   })
 
   const backups = backupsQuery.data ?? []
@@ -445,8 +452,8 @@ export default function BackupPage() {
           <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
               <span>{t('backup.destinationHint')}</span>
-              <span><span className="font-medium text-foreground/80">{t('backup.lastRun')}:</span> {formatDate(configQuery.data?.last_run_at ?? null)}</span>
-              <span><span className="font-medium text-foreground/80">{t('backup.nextRun')}:</span> {formatDate(configQuery.data?.next_run_at ?? null)}</span>
+              <span><span className="font-medium text-foreground/80">{t('backup.lastRun')}:</span> {formatDate(configQuery.data?.last_run_at ?? null, dateLocale)}</span>
+              <span><span className="font-medium text-foreground/80">{t('backup.nextRun')}:</span> {formatDate(configQuery.data?.next_run_at ?? null, dateLocale)}</span>
             </div>
             <Button size="sm" className="h-8 shrink-0" onClick={() => saveConfigMutation.mutate()} disabled={saveConfigMutation.isPending}>
               <Save className="h-3.5 w-3.5" />
@@ -491,7 +498,7 @@ export default function BackupPage() {
                   <Badge variant="secondary" className="rounded-full px-2 py-0 text-[11px]">{contentLabel(item.content, t)}</Badge>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  {formatDate(item.created_at)} · {formatBytes(item.size_bytes)} · {countSummary(item.entity_counts)}
+                  {formatDate(item.created_at, dateLocale)} · {formatBytes(item.size_bytes)} · {countSummary(item.entity_counts, t)}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap gap-2">
