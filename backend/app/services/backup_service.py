@@ -58,7 +58,7 @@ from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
 from app.models.transaction_split import TransactionSplit
-from app.models.workspace import Workspace, WorkspaceTaxId
+from app.models.workspace import Workspace, WorkspaceMember, WorkspaceTaxId
 from app.providers import get_storage_provider
 from app.services import invoice_logo_service, workspace_service
 from app.services.attachment_service import sanitize_filename
@@ -107,6 +107,14 @@ class EntitySpec:
     model: type | None = None
 
 
+@dataclass
+class RestoreIdMaps:
+    by_table: dict[str, dict[str, str]]
+    flat_entities: dict[str, str]
+    groupings: dict[tuple[str, str], dict[str, str]]
+    opaque_references: dict[tuple[str, str], str]
+
+
 @dataclass(frozen=True)
 class PreservedReference:
     model: type
@@ -121,8 +129,9 @@ RESTORE_ORDER: list[str] = [
     "payees",
     "payee_tax_ids",
     "payee_mappings",
-    "accounts",
     "asset_groups",
+    "assets",
+    "accounts",
     "collections",
     "collection_accounts",
     "collection_asset_groups",
@@ -139,7 +148,6 @@ RESTORE_ORDER: list[str] = [
     "invoice_settings",
     "invoice_schedules",
     "invoice_schedule_terms",
-    "assets",
     "asset_values",
     "asset_transactions",
     "transactions",
@@ -198,6 +206,24 @@ MODEL_SPECS: dict[str, EntitySpec] = {
     ),
     "reconciliation_events": EntitySpec("reconciliation_events", ReconciliationEvent),
     "goals": EntitySpec("goals", Goal),
+}
+
+WORKSPACE_MODELS_BY_TABLE = {
+    spec.model.__table__.name: spec.model
+    for spec in MODEL_SPECS.values()
+    if spec.model is not None
+    and "id" in spec.model.__table__.columns
+    and "workspace_id" in spec.model.__table__.columns
+}
+GROUPING_FIELDS_BY_ENTITY = {
+    "transactions": ("transfer_pair_id",),
+    "reconciliation_suggestions": ("group_id",),
+}
+NON_PORTABLE_REFERENCE_TABLES = {"bank_connections", "institutions"}
+POLYMORPHIC_EXPECTATION_TABLES = {
+    "invoice": "invoices",
+    "recurring": "recurring_transactions",
+    "transaction": "transactions",
 }
 
 # Configuration is intentionally limited to entities that can be restored without
@@ -272,7 +298,6 @@ NULL_WHEN_UNMAPPED = {
     "category_id",
     "corrects_id",
     "credit_note_id",
-    "group_id",
     "group_member_id",
     "import_id",
     "invoice_id",
@@ -284,7 +309,6 @@ NULL_WHEN_UNMAPPED = {
     "resolved_by",
     "schedule_id",
     "transaction_id",
-    "transfer_pair_id",
     "from_member_id",
     "to_member_id",
     "receiver_transaction_id",
@@ -821,35 +845,146 @@ def _build_id_map(
     names: list[str],
     *,
     remap: bool,
-) -> dict[str, str]:
-    id_map: dict[str, str] = {}
+) -> RestoreIdMaps:
+    by_table: dict[str, dict[str, str]] = {}
+    flat_entities: dict[str, str] = {}
+    entity_tables: dict[str, str] = {}
+    groupings: dict[tuple[str, str], dict[str, str]] = {}
     for name in names:
         if name in ("collection_accounts", "collection_asset_groups"):
             continue
+        model = MODEL_SPECS[name].model
+        assert model is not None
+        table_name = model.__table__.name
+        table_map = by_table.setdefault(table_name, {})
         for row in _read_json_file(zf, name):
             old_id = row.get("id")
             if old_id:
-                id_map[str(old_id)] = str(uuid.uuid4()) if remap else str(old_id)
-    return id_map
+                source_id = str(old_id)
+                previous_table = entity_tables.get(source_id)
+                if previous_table is not None and previous_table != table_name:
+                    raise ValueError(
+                        f"Entity id {source_id} is reused by {previous_table} and {table_name}"
+                    )
+                mapped_id = table_map.setdefault(
+                    source_id,
+                    str(uuid.uuid4()) if remap else source_id,
+                )
+                entity_tables[source_id] = table_name
+                flat_entities[source_id] = mapped_id
+            for field in GROUPING_FIELDS_BY_ENTITY.get(name, ()):
+                grouping_id = row.get(field)
+                if grouping_id:
+                    source_id = str(grouping_id)
+                    grouping_map = groupings.setdefault((table_name, field), {})
+                    grouping_map.setdefault(
+                        source_id,
+                        str(uuid.uuid4()) if remap else source_id,
+                    )
+    return RestoreIdMaps(
+        by_table=by_table,
+        flat_entities=flat_entities,
+        groupings=groupings,
+        opaque_references={},
+    )
+
+
+async def _current_workspace_reference_scope(
+    session: AsyncSession,
+    workspace_id: uuid.UUID,
+    target_user_id: uuid.UUID,
+) -> tuple[dict[str, set[str]], set[str]]:
+    owned_ids: dict[str, set[str]] = {}
+    for table_name, model in WORKSPACE_MODELS_BY_TABLE.items():
+        result = await session.execute(select(model.id).where(model.workspace_id == workspace_id))
+        owned_ids[table_name] = {str(value) for value in result.scalars()}
+
+    member_result = await session.execute(
+        select(WorkspaceMember.user_id).where(WorkspaceMember.workspace_id == workspace_id)
+    )
+    workspace_user_ids = {str(value) for value in member_result.scalars()}
+    workspace_user_ids.add(str(target_user_id))
+    return owned_ids, workspace_user_ids
+
+
+def _rewrite_workspace_reference(
+    model: Any,
+    column: Any,
+    value: Any,
+    *,
+    target_table: str,
+    id_maps: RestoreIdMaps,
+    owned_reference_ids: dict[str, set[str]],
+) -> Any:
+    source_id = str(value)
+    table_map = id_maps.by_table.get(target_table, {})
+    if source_id in table_map:
+        return table_map[source_id]
+    if source_id in owned_reference_ids.get(target_table, set()):
+        return source_id
+    if column.nullable:
+        return None
+    raise ValueError(
+        f"{model.__table__.name}.{column.key} references a record outside the target workspace"
+    )
+
+
+def _rewrite_polymorphic_reference(
+    model: Any,
+    column: Any,
+    row: dict[str, Any],
+    value: Any,
+    *,
+    id_maps: RestoreIdMaps,
+    owned_reference_ids: dict[str, set[str]],
+) -> Any:
+    target_table = POLYMORPHIC_EXPECTATION_TABLES.get(str(row.get("expectation_kind")))
+    if target_table is None:
+        raise ValueError(
+            f"Unsupported reconciliation expectation kind: {row.get('expectation_kind')}"
+        )
+
+    source_id = str(value)
+    table_map = id_maps.by_table.get(target_table, {})
+    if source_id in table_map:
+        return table_map[source_id]
+    if source_id in owned_reference_ids.get(target_table, set()):
+        return source_id
+
+    # Reconciliation history deliberately survives deletion of its expectation.
+    # Pending suggestions still require a live target; completed suggestions and
+    # events receive a stable opaque replacement instead of retaining a UUID that
+    # could resolve to another workspace's row.
+    if model is ReconciliationSuggestion and row.get("status") == "pending":
+        raise ValueError(
+            f"{model.__table__.name}.{column.key} references a record outside the target workspace"
+        )
+    opaque_key = (target_table, source_id)
+    return id_maps.opaque_references.setdefault(opaque_key, str(uuid.uuid4()))
 
 
 def _prepare_model_data(
     model: Any,
     row: dict[str, Any],
     *,
-    id_map: dict[str, str],
+    id_maps: RestoreIdMaps,
     target_workspace_id: uuid.UUID,
     target_user_id: uuid.UUID,
     remap: bool,
+    owned_reference_ids: dict[str, set[str]],
+    workspace_user_ids: set[str],
 ) -> dict[str, Any]:
     columns = {col.key: col for col in model.__table__.columns}
+    table_name = model.__table__.name
+    table_map = id_maps.by_table.get(table_name, {})
     data: dict[str, Any] = {}
     for key, value in row.items():
         if key == "backup_path" or key not in columns:
             continue
-        rewritten = _rewrite_json(value, id_map)
+        column = columns[key]
+        rewritten = _rewrite_json(value, id_maps.flat_entities)
         if key == "id" and value is not None:
-            rewritten = id_map.get(str(value), str(value))
+            rewritten = table_map.get(str(value), str(value))
         elif key == "workspace_id" and "workspace_id" in columns:
             rewritten = str(target_workspace_id)
         elif key in {
@@ -860,6 +995,12 @@ def _prepare_model_data(
             "resolved_by",
         }:
             rewritten = str(target_user_id) if value is not None else None
+        elif model is AssetGroup and key == "external_id" and remap:
+            # Provider wallet identities are user-scoped. A restored copy has
+            # no live provider connection and must not collide with the source.
+            rewritten = None
+        elif value is not None and (table_name, key) in id_maps.groupings:
+            rewritten = id_maps.groupings[(table_name, key)][str(value)]
         elif key == "connection_id" and "connection_id" in columns:
             rewritten = None
         elif key == "share_token":
@@ -867,9 +1008,55 @@ def _prepare_model_data(
         elif key == "logo_id":
             # Logo IDs are storage object identifiers, not entity primary keys.
             rewritten = value
-        elif key in NULL_WHEN_UNMAPPED and value is not None and remap and str(value) not in id_map:
+        elif (
+            key == "expectation_id"
+            and model in {ReconciliationSuggestion, ReconciliationEvent}
+            and value is not None
+        ):
+            rewritten = _rewrite_polymorphic_reference(
+                model,
+                column,
+                row,
+                value,
+                id_maps=id_maps,
+                owned_reference_ids=owned_reference_ids,
+            )
+        elif value is not None and column.foreign_keys:
+            target_tables = {foreign_key.column.table.name for foreign_key in column.foreign_keys}
+            if len(target_tables) != 1:
+                raise ValueError(f"Ambiguous reference target for {model.__table__.name}.{key}")
+            target_table = target_tables.pop()
+            if target_table == "users":
+                source_id = str(value)
+                if source_id in workspace_user_ids:
+                    rewritten = source_id
+                elif column.nullable:
+                    rewritten = None
+                else:
+                    raise ValueError(
+                        f"{model.__table__.name}.{key} references a user outside the target workspace"
+                    )
+            elif target_table in NON_PORTABLE_REFERENCE_TABLES:
+                if not column.nullable:
+                    raise ValueError(f"{model.__table__.name}.{key} cannot be restored")
+                rewritten = None
+            elif target_table in WORKSPACE_MODELS_BY_TABLE:
+                rewritten = _rewrite_workspace_reference(
+                    model,
+                    column,
+                    value,
+                    target_table=target_table,
+                    id_maps=id_maps,
+                    owned_reference_ids=owned_reference_ids,
+                )
+        elif (
+            key in NULL_WHEN_UNMAPPED
+            and value is not None
+            and remap
+            and str(value) not in id_maps.flat_entities
+        ):
             rewritten = None
-        data[key] = _deserialize_column(columns[key], rewritten)
+        data[key] = _deserialize_column(column, rewritten)
 
     if "workspace_id" in columns:
         data["workspace_id"] = target_workspace_id
@@ -884,10 +1071,10 @@ async def _clear_workspace_entities(
     session: AsyncSession,
     workspace_id: uuid.UUID,
     names: list[str],
-    id_map: dict[str, str],
+    id_maps: RestoreIdMaps,
 ) -> tuple[list[str], list[PreservedReference]]:
     name_set = set(names)
-    archived_ids = set(id_map)
+    archived_ids = set(id_maps.flat_entities)
     stale_storage_keys: list[str] = []
     preserved_references: list[PreservedReference] = []
     attachment_models = []
@@ -1112,14 +1299,36 @@ async def _insert_associations(
     session: AsyncSession,
     table_name: str,
     rows: list[dict[str, Any]],
-    id_map: dict[str, str],
+    id_maps: RestoreIdMaps,
+    owned_reference_ids: dict[str, set[str]],
 ) -> int:
     table = collection_accounts if table_name == "collection_accounts" else collection_asset_groups
+    target_tables = {
+        "collection_id": "collections",
+        "account_id": "accounts",
+        "asset_group_id": "asset_groups",
+    }
     prepared = []
     for row in rows:
-        mapped = {k: id_map.get(str(v), str(v)) for k, v in row.items() if v is not None}
-        if all(mapped.values()):
-            prepared.append({k: uuid.UUID(v) for k, v in mapped.items()})
+        mapped: dict[str, str] = {}
+        for key, value in row.items():
+            if value is None:
+                continue
+            source_id = str(value)
+            target_table = target_tables.get(key)
+            if target_table is None:
+                continue
+            table_map = id_maps.by_table.get(target_table, {})
+            if source_id in table_map:
+                mapped[key] = table_map[source_id]
+            elif source_id in owned_reference_ids.get(target_table, set()):
+                mapped[key] = source_id
+            else:
+                raise ValueError(
+                    f"{table_name}.{key} references a record outside the target workspace"
+                )
+        if set(mapped) == set(row):
+            prepared.append({key: uuid.UUID(value) for key, value in mapped.items()})
     if prepared:
         await session.execute(insert(table), prepared)
     return len(prepared)
@@ -1201,8 +1410,15 @@ async def restore_backup_bytes(
                     self_membership=True,
                     seed_defaults=False,
                 )
+                owned_reference_ids: dict[str, set[str]] = {}
+                workspace_user_ids = {str(target_user_id)}
             else:
                 target_workspace = current_workspace
+                owned_reference_ids, workspace_user_ids = await _current_workspace_reference_scope(
+                    session,
+                    target_workspace.id,
+                    target_user_id,
+                )
                 stale_storage_keys, preserved_references = await _clear_workspace_entities(
                     session,
                     target_workspace.id,
@@ -1219,7 +1435,13 @@ async def restore_backup_bytes(
                     restored_counts[name] = 0
                     continue
                 if name in ("collection_accounts", "collection_asset_groups"):
-                    restored_counts[name] = await _insert_associations(session, name, rows, id_map)
+                    restored_counts[name] = await _insert_associations(
+                        session,
+                        name,
+                        rows,
+                        id_map,
+                        owned_reference_ids,
+                    )
                     continue
                 model = MODEL_SPECS[name].model
                 assert model is not None
@@ -1263,10 +1485,12 @@ async def restore_backup_bytes(
                         prepared = _prepare_model_data(
                             model,
                             row,
-                            id_map=id_map,
+                            id_maps=id_map,
                             target_workspace_id=target_workspace.id,
                             target_user_id=target_user_id,
                             remap=remap,
+                            owned_reference_ids=owned_reference_ids,
+                            workspace_user_ids=workspace_user_ids,
                         )
                         filename = sanitize_filename(prepared.get("filename") or "attachment")
                         if name == "transaction_attachments":
@@ -1303,10 +1527,12 @@ async def restore_backup_bytes(
                         prepared = _prepare_model_data(
                             model,
                             row,
-                            id_map=id_map,
+                            id_maps=id_map,
                             target_workspace_id=target_workspace.id,
                             target_user_id=target_user_id,
                             remap=remap,
+                            owned_reference_ids=owned_reference_ids,
+                            workspace_user_ids=workspace_user_ids,
                         )
                         corrects_id = prepared.pop("corrects_id", None)
                         invoice = Invoice(**prepared)
@@ -1325,10 +1551,12 @@ async def restore_backup_bytes(
                     prepared = _prepare_model_data(
                         model,
                         row,
-                        id_map=id_map,
+                        id_maps=id_map,
                         target_workspace_id=target_workspace.id,
                         target_user_id=target_user_id,
                         remap=remap,
+                        owned_reference_ids=owned_reference_ids,
+                        workspace_user_ids=workspace_user_ids,
                     )
                     session.add(model(**prepared))
                     count += 1

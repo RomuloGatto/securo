@@ -13,12 +13,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.models.asset import Asset
+from app.models.asset_group import AssetGroup
 from app.models.category import Category
+from app.models.group import Group
 from app.models.invoice import Invoice, InvoiceLine, InvoiceSettings
 from app.models.invoice_attachment import InvoiceAttachment
 from app.models.invoice_schedule import InvoiceSchedule
 from app.models.payee import Payee
 from app.models.product import Product, ProductPrice
+from app.models.reconciliation import ReconciliationEvent, ReconciliationSuggestion
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.rule import Rule
 from app.models.transaction import Transaction
@@ -344,6 +348,332 @@ async def test_restore_upload_creates_new_workspace_without_bank_connection(
         .where(WorkspaceMember.workspace_id == restored_workspace_id)
     )
     assert membership_count == 1
+
+
+@pytest.mark.asyncio
+async def test_new_workspace_restore_preserves_grouping_and_avoids_user_scoped_collisions(
+    session: AsyncSession,
+    test_user,
+    test_workspace: Workspace,
+    test_account,
+    test_transactions,
+):
+    source_pair_id = uuid.uuid4()
+    test_transactions[0].transfer_pair_id = source_pair_id
+    test_transactions[1].transfer_pair_id = source_pair_id
+
+    recurring = RecurringTransaction(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        account_id=test_account.id,
+        description="Workspace-scoped recurring payment",
+        amount=Decimal("25.00"),
+        currency="USD",
+        type="debit",
+        frequency="monthly",
+        start_date=date(2026, 1, 1),
+        next_occurrence=date(2026, 11, 1),
+    )
+    synced_group = AssetGroup(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Synced wallet",
+        source="test-provider",
+        external_id="provider-wallet-1",
+    )
+    user_group = Group(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Workspace-scoped group",
+    )
+    secured_asset = Asset(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Restored property",
+        type="real_estate",
+        currency="USD",
+        source="manual",
+    )
+    source_suggestion_group_id = uuid.uuid4()
+    suggestions = [
+        ReconciliationSuggestion(
+            workspace_id=test_workspace.id,
+            transaction_id=transaction.id,
+            expectation_kind="transaction",
+            expectation_id=expectation.id,
+            group_id=source_suggestion_group_id,
+            strategy_id="test-strategy",
+            node="transaction",
+            amount=transaction.amount,
+            scores={},
+            status="pending",
+        )
+        for transaction, expectation in zip(test_transactions[:2], test_transactions[2:4])
+    ]
+    orphan_expectation_id = uuid.uuid4()
+    historical_suggestion = ReconciliationSuggestion(
+        workspace_id=test_workspace.id,
+        transaction_id=test_transactions[2].id,
+        expectation_kind="invoice",
+        expectation_id=orphan_expectation_id,
+        strategy_id="historical-strategy",
+        node="invoice",
+        amount=test_transactions[2].amount,
+        scores={},
+        status="declined",
+    )
+    historical_event = ReconciliationEvent(
+        workspace_id=test_workspace.id,
+        action="declined",
+        transaction_id=test_transactions[2].id,
+        expectation_kind="invoice",
+        expectation_id=orphan_expectation_id,
+        amount=test_transactions[2].amount,
+        strategy_id="historical-strategy",
+        user_id=test_user.id,
+        detail={},
+    )
+    session.add_all(
+        [
+            recurring,
+            synced_group,
+            user_group,
+            secured_asset,
+            *suggestions,
+            historical_suggestion,
+            historical_event,
+        ]
+    )
+    await session.flush()
+    test_account.secured_asset_id = secured_asset.id
+    source_account_id = test_account.id
+    source_asset_id = secured_asset.id
+    source_user_group_name = user_group.name
+    await session.commit()
+
+    data = await backup_service.build_backup_zip(
+        session,
+        test_workspace,
+        content=backup_service.BackupContent.data,
+    )
+    result = await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.data,
+        mode=backup_service.BackupRestoreMode.new_workspace,
+    )
+
+    restored_recurring = (
+        await session.execute(
+            select(RecurringTransaction).where(
+                RecurringTransaction.workspace_id == result.workspace_id
+            )
+        )
+    ).scalar_one()
+    restored_group = (
+        await session.execute(
+            select(AssetGroup).where(AssetGroup.workspace_id == result.workspace_id)
+        )
+    ).scalar_one()
+    restored_user_group = (
+        await session.execute(select(Group).where(Group.workspace_id == result.workspace_id))
+    ).scalar_one()
+    restored_account = (
+        await session.execute(select(Account).where(Account.workspace_id == result.workspace_id))
+    ).scalar_one()
+    restored_asset = (
+        await session.execute(select(Asset).where(Asset.workspace_id == result.workspace_id))
+    ).scalar_one()
+    restored_transactions = list(
+        (
+            await session.execute(
+                select(Transaction)
+                .where(
+                    Transaction.workspace_id == result.workspace_id,
+                    Transaction.transfer_pair_id.is_not(None),
+                )
+                .order_by(Transaction.id)
+            )
+        ).scalars()
+    )
+    restored_suggestions = list(
+        (
+            await session.execute(
+                select(ReconciliationSuggestion)
+                .where(
+                    ReconciliationSuggestion.workspace_id == result.workspace_id,
+                    ReconciliationSuggestion.group_id.is_not(None),
+                )
+                .order_by(ReconciliationSuggestion.id)
+            )
+        ).scalars()
+    )
+    restored_historical_suggestion = (
+        await session.execute(
+            select(ReconciliationSuggestion).where(
+                ReconciliationSuggestion.workspace_id == result.workspace_id,
+                ReconciliationSuggestion.status == "declined",
+            )
+        )
+    ).scalar_one()
+    restored_historical_event = (
+        await session.execute(
+            select(ReconciliationEvent).where(
+                ReconciliationEvent.workspace_id == result.workspace_id
+            )
+        )
+    ).scalar_one()
+
+    assert restored_recurring.account_id != source_account_id
+    assert restored_group.external_id is None
+    assert restored_user_group.name == source_user_group_name
+    assert restored_account.secured_asset_id == restored_asset.id
+    assert restored_asset.id != source_asset_id
+    assert len(restored_transactions) == 2
+    assert restored_transactions[0].transfer_pair_id == restored_transactions[1].transfer_pair_id
+    assert restored_transactions[0].transfer_pair_id != source_pair_id
+    assert len(restored_suggestions) == 2
+    assert restored_suggestions[0].group_id == restored_suggestions[1].group_id
+    assert restored_suggestions[0].group_id != source_suggestion_group_id
+    assert restored_historical_suggestion.expectation_id == (
+        restored_historical_event.expectation_id
+    )
+    assert restored_historical_suggestion.expectation_id != orphan_expectation_id
+
+
+@pytest.mark.asyncio
+async def test_current_restore_rejects_cross_workspace_references_but_keeps_owned_ones(
+    session: AsyncSession,
+    test_user,
+    test_workspace: Workspace,
+    test_account,
+    test_transactions,
+):
+    foreign_workspace = Workspace(
+        name="Foreign workspace",
+        kind="personal",
+        created_by_user_id=test_user.id,
+        default_currency="USD",
+    )
+    session.add(foreign_workspace)
+    await session.flush()
+    foreign_account = Account(
+        user_id=test_user.id,
+        workspace_id=foreign_workspace.id,
+        name="Foreign account",
+        type="checking",
+        balance=Decimal("0.00"),
+        currency="USD",
+    )
+    foreign_category = Category(
+        user_id=test_user.id,
+        workspace_id=foreign_workspace.id,
+        name="Foreign category",
+    )
+    session.add_all([foreign_account, foreign_category])
+    await session.commit()
+    foreign_account_id = foreign_account.id
+
+    source_transaction = test_transactions[0]
+    source_transaction_id = source_transaction.id
+    test_account_id = test_account.id
+    test_user_id = test_user.id
+    test_workspace_id = test_workspace.id
+    test_workspace_name = test_workspace.name
+    transaction_row = backup_service._serialize_model(source_transaction)
+    transaction_row["category_id"] = str(foreign_category.id)
+    metadata = {
+        "format_version": backup_service.FORMAT_VERSION,
+        "content": "data",
+        "workspace_id": str(test_workspace_id),
+        "workspace_name": test_workspace_name,
+        "entity_counts": {"transactions": 1},
+        "warnings": [],
+    }
+    archive = backup_service.build_backup_archive(
+        {
+            "metadata.json": metadata,
+            "transactions.json": [transaction_row],
+        }
+    )
+
+    await backup_service.restore_backup_bytes(
+        session,
+        data=archive,
+        target_user_id=test_user_id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.data,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+
+    session.expire_all()
+    restored = await session.get(Transaction, source_transaction_id)
+    assert restored is not None
+    assert restored.account_id == test_account_id
+    assert restored.category_id is None
+
+    current_workspace = await session.get(Workspace, test_workspace_id)
+    assert current_workspace is not None
+    transaction_row["account_id"] = str(foreign_account_id)
+    # A grouping UUID must not act as an untyped allow-list entry for a
+    # foreign-key value that happens to use the same UUID.
+    transaction_row["transfer_pair_id"] = str(foreign_account_id)
+    malicious_archive = backup_service.build_backup_archive(
+        {
+            "metadata.json": metadata,
+            "transactions.json": [transaction_row],
+        }
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        await backup_service.restore_backup_bytes(
+            session,
+            data=malicious_archive,
+            target_user_id=test_user_id,
+            current_workspace=current_workspace,
+            content=backup_service.BackupContent.data,
+            mode=backup_service.BackupRestoreMode.current_workspace,
+            confirmation="RESTORE",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "account_id" in exc_info.value.detail
+    session.expire_all()
+    preserved = await session.get(Transaction, source_transaction_id)
+    assert preserved is not None
+    assert preserved.account_id == test_account_id
+
+
+@pytest.mark.asyncio
+async def test_restore_associations_do_not_trust_unrelated_grouping_ids(
+    session: AsyncSession,
+):
+    account_id = str(uuid.uuid4())
+    foreign_collection_id = str(uuid.uuid4())
+    id_maps = backup_service.RestoreIdMaps(
+        by_table={"accounts": {account_id: account_id}},
+        flat_entities={account_id: account_id},
+        groupings={
+            ("transactions", "transfer_pair_id"): {foreign_collection_id: foreign_collection_id}
+        },
+        opaque_references={},
+    )
+
+    with pytest.raises(ValueError, match="collection_id"):
+        await backup_service._insert_associations(
+            session,
+            "collection_accounts",
+            [
+                {
+                    "collection_id": foreign_collection_id,
+                    "account_id": account_id,
+                }
+            ],
+            id_maps,
+            {"accounts": {account_id}},
+        )
 
 
 @pytest.mark.asyncio

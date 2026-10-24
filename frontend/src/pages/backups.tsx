@@ -417,13 +417,14 @@ export default function BackupPage() {
         <CardHeader className="px-4 pb-2 pt-4">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
-              <CardTitle className="text-base">{t('backup.scheduleTitle')}</CardTitle>
+              <CardTitle id="backup-schedule-title" className="text-base">{t('backup.scheduleTitle')}</CardTitle>
               <CardDescription className="max-w-4xl text-xs leading-5">{t('backup.scheduleDescription')}</CardDescription>
             </div>
             <Switch
               checked={scheduledEnabled}
               onCheckedChange={setScheduledEnabled}
               disabled={configQuery.data?.storage_shared === false}
+              aria-labelledby="backup-schedule-title"
               className="shrink-0"
             />
           </div>
