@@ -17,6 +17,7 @@ import {
 
 import {
   backup as backupApi,
+  type BackupConfig,
   type BackupContent,
   type BackupItem,
   type BackupPreview,
@@ -78,10 +79,12 @@ function countSummary(counts: Record<string, number>, t: TFunction): string {
     .map((key) => [key, counts[key] ?? 0] as const)
     .filter(([, count]) => count > 0)
   const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
-  const details = important.length
-    ? important.map(([key, count]) => t(`backup.counts.${key}`, { count })).join(' · ')
-    : t('backup.counts.empty')
-  return `${t('backup.counts.total', { count: total })} · ${details}`
+  const totalLabel = t('backup.counts.total', { count: total })
+  if (!important.length) return totalLabel
+  const details = important
+    .map(([key, count]) => t(`backup.counts.${key}`, { count }))
+    .join(' · ')
+  return `${totalLabel} · ${details}`
 }
 
 function formatDate(value: string | null, locale: string): string {
@@ -138,7 +141,7 @@ export default function BackupPage() {
 
   const [runContent, setRunContent] = useState<BackupContent>('both')
   const [scheduledEnabled, setScheduledEnabled] = useState(false)
-  const [hydratedConfigUpdatedAt, setHydratedConfigUpdatedAt] = useState(0)
+  const [hydratedConfig, setHydratedConfig] = useState<BackupConfig | null>(null)
   const [schedule, setSchedule] = useState<'daily' | 'weekly'>('daily')
   const [configContent, setConfigContent] = useState<BackupContent>('both')
   const [retentionCount, setRetentionCount] = useState('10')
@@ -174,8 +177,8 @@ export default function BackupPage() {
     setConfigContent(cfg.content)
     setRetentionCount(String(cfg.retention_count))
     setRetentionDays(cfg.retention_days ? String(cfg.retention_days) : '')
-    setHydratedConfigUpdatedAt(configQuery.dataUpdatedAt)
-  }, [configQuery.data, configQuery.dataUpdatedAt])
+    setHydratedConfig(cfg)
+  }, [configQuery.data])
 
   const invalidateBackups = () => {
     void queryClient.invalidateQueries({ queryKey: ['backups'] })
@@ -482,7 +485,7 @@ export default function BackupPage() {
               disabled={
                 saveConfigMutation.isPending ||
                 !configQuery.data ||
-                hydratedConfigUpdatedAt !== configQuery.dataUpdatedAt
+                hydratedConfig !== configQuery.data
               }
             >
               <Save className="h-3.5 w-3.5" />

@@ -5,9 +5,6 @@ import zipfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
-
 import pytest
 from fastapi import HTTPException
 from httpx import AsyncClient
@@ -15,6 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.account import Account
+from app.models.app_settings import AppSetting
 from app.models.asset import Asset
 from app.models.asset_group import AssetGroup
 from app.models.category import Category
@@ -1287,36 +1285,43 @@ async def test_restore_rejects_rule_action_referencing_foreign_workspace_payee(
 
 
 @pytest.mark.asyncio
-async def test_scheduled_backup_failure_rolls_back_before_next_workspace(monkeypatch):
+async def test_scheduled_backup_failure_rolls_back_before_next_workspace(
+    session: AsyncSession,
+    test_user: User,
+    monkeypatch,
+):
     workspace_ids = [uuid.uuid4(), uuid.uuid4()]
-    settings = [
-        SimpleNamespace(key=backup_service._config_key(workspace_id))
-        for workspace_id in workspace_ids
-    ]
-    execute_result = MagicMock()
-    execute_result.scalars.return_value.all.return_value = settings
-    fake_session = MagicMock()
-    fake_session.execute = AsyncMock(return_value=execute_result)
-    fake_session.get = AsyncMock(
-        side_effect=[
-            SimpleNamespace(id=workspace_ids[0], is_archived=False),
-            SimpleNamespace(id=workspace_ids[1], is_archived=False),
+    session.add_all(
+        [
+            Workspace(
+                id=workspace_id,
+                name=f"Scheduled {index}",
+                created_by_user_id=test_user.id,
+            )
+            for index, workspace_id in enumerate(workspace_ids)
+        ]
+        + [
+            AppSetting(key=backup_service._config_key(workspace_id), value="{}")
+            for workspace_id in workspace_ids
         ]
     )
-    fake_session.rollback = AsyncMock()
-    config = SimpleNamespace(
-        scheduled_enabled=True,
-        last_run_at=None,
-        schedule="daily",
-        content=backup_service.BackupContent.both,
-    )
-    monkeypatch.setattr(backup_service, "get_backup_config", AsyncMock(return_value=config))
-    create_backup = AsyncMock(side_effect=[RuntimeError("first failed"), None])
-    monkeypatch.setattr(backup_service, "create_stored_backup", create_backup)
+    await session.commit()
+
+    async def fake_get_backup_config(_session, _workspace_id):
+        return backup_service.BackupConfig(scheduled_enabled=True)
+
+    attempted_workspace_ids = []
+
+    async def fake_create_stored_backup(_session, workspace, **_kwargs):
+        attempted_workspace_ids.append(workspace.id)
+        if len(attempted_workspace_ids) == 1:
+            raise RuntimeError("first failed")
+
+    monkeypatch.setattr(backup_service, "get_backup_config", fake_get_backup_config)
+    monkeypatch.setattr(backup_service, "create_stored_backup", fake_create_stored_backup)
     monkeypatch.setattr(backup_service.get_settings(), "backup_storage_shared", True)
 
-    result = await backup_service.run_scheduled_backups(fake_session)
+    result = await backup_service.run_scheduled_backups(session)
 
     assert result == {"created": 1, "skipped": 0, "errors": ["first failed"]}
-    fake_session.rollback.assert_awaited_once()
-    assert create_backup.await_count == 2
+    assert set(attempted_workspace_ids) == set(workspace_ids)

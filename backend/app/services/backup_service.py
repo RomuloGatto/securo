@@ -1679,15 +1679,15 @@ async def run_scheduled_backups(session: AsyncSession) -> dict[str, Any]:
     result = await session.execute(
         select(AppSetting).where(AppSetting.key.like(f"{CONFIG_KEY_PREFIX}%{CONFIG_KEY_SUFFIX}"))
     )
-    settings = result.scalars().all()
+    setting_keys = [setting.key for setting in result.scalars().all()]
     now = _now()
     created = 0
     skipped = 0
     errors: list[str] = []
-    for setting in settings:
+    for setting_key in setting_keys:
         try:
             workspace_id = uuid.UUID(
-                setting.key.removeprefix(CONFIG_KEY_PREFIX).removesuffix(CONFIG_KEY_SUFFIX)
+                setting_key.removeprefix(CONFIG_KEY_PREFIX).removesuffix(CONFIG_KEY_SUFFIX)
             )
             cfg = await get_backup_config(session, workspace_id)
             if not cfg.scheduled_enabled:

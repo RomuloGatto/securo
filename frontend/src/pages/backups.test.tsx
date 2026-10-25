@@ -86,6 +86,22 @@ describe('BackupPage', () => {
     await waitFor(() => expect(save).toBeEnabled())
   })
 
+  it('keeps unsaved edits when an identical config refetch completes', async () => {
+    const { container, queryClient, user } = renderWithProviders(<BackupPage />)
+    const save = await screen.findByRole('button', { name: t('common.save') })
+    await waitFor(() => expect(save).toBeEnabled())
+    const retentionCount = container.querySelector('input[type="number"]') as HTMLInputElement
+    await user.clear(retentionCount)
+    await user.type(retentionCount, '7')
+
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: ['backup-config'] })
+    })
+
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2))
+    expect(retentionCount).toHaveValue(7)
+  })
+
   it('ignores an older upload preview that resolves after the current file', async () => {
     const firstRequest = deferred<BackupPreview>()
     const secondRequest = deferred<BackupPreview>()
@@ -115,7 +131,7 @@ describe('BackupPage', () => {
     await waitFor(() => expect(api.list).toHaveBeenCalledTimes(2))
   })
 
-  it('shows a total that includes entity types omitted from the compact breakdown', async () => {
+  it('shows a clean total for entity types omitted from the compact breakdown', async () => {
     const item: BackupItem = {
       id: 'backup-1',
       filename: 'backup.zip',
@@ -124,11 +140,12 @@ describe('BackupPage', () => {
       workspace_id: 'workspace-1',
       workspace_name: 'Workspace',
       content: 'both',
-      entity_counts: { accounts: 1, products: 2 },
+      entity_counts: { products: 2 },
     }
     api.list.mockResolvedValue([item])
     renderWithProviders(<BackupPage />)
 
-    expect(await screen.findByText(/Total: 3/)).toBeInTheDocument()
+    const summary = await screen.findByText(/Total: 2/)
+    expect(summary).not.toHaveTextContent(t('backup.counts.empty'))
   })
 })
