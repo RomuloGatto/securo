@@ -407,7 +407,7 @@ export default function BackupPage() {
                 size="sm"
                 className="h-9 px-4"
                 onClick={() => restoreUploadMutation.mutate()}
-                disabled={!uploadFile || restoreUploadMutation.isPending || (uploadMode === 'current_workspace' && uploadConfirmation !== 'RESTORE')}
+                disabled={!uploadFile || !uploadPreview || restoreUploadMutation.isPending || (uploadMode === 'current_workspace' && uploadConfirmation !== 'RESTORE')}
               >
                 <ArchiveRestore className="h-4 w-4" />
                 {restoreUploadMutation.isPending ? t('backup.restoring') : t('backup.restore')}

@@ -227,6 +227,7 @@ GROUPING_FIELDS_BY_ENTITY = {
     "transactions": ("transfer_pair_id",),
     "reconciliation_suggestions": ("group_id",),
 }
+ATTACHMENT_ENTITY_NAMES = {"transaction_attachments", "invoice_attachments"}
 NON_PORTABLE_REFERENCE_TABLES = {"bank_connections", "institutions"}
 POLYMORPHIC_EXPECTATION_TABLES = {
     "invoice": "invoices",
@@ -458,6 +459,16 @@ def _invoice_logo_ids(name: str, row: dict[str, Any]) -> list[str]:
     return []
 
 
+def _clear_invoice_logo_reference(name: str, row: dict[str, Any]) -> None:
+    if name == "invoice_settings":
+        row["logo_id"] = None
+        return
+    snapshot = row.get("snapshot")
+    issuer = snapshot.get("issuer") if isinstance(snapshot, dict) else None
+    if isinstance(issuer, dict):
+        issuer["logo_id"] = None
+
+
 async def get_backup_config(session: AsyncSession, workspace_id: uuid.UUID) -> BackupConfig:
     setting = await session.get(AppSetting, _config_key(workspace_id))
     if setting is None:
@@ -562,11 +573,12 @@ async def build_backup_zip(
     warnings: list[str] = []
     storage = get_storage_provider()
     archived_logo_ids: set[str] = set()
+    omitted_attachment_ids: dict[str, list[str]] = {}
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for name in names:
             rows = await _fetch_entity_rows(session, name, workspace.id)
-            if name in {"transaction_attachments", "invoice_attachments"}:
+            if name in ATTACHMENT_ENTITY_NAMES:
                 rows_with_files = []
                 for row in rows:
                     try:
@@ -575,6 +587,9 @@ async def build_backup_zip(
                         warnings.append(
                             f"Attachment skipped because its stored file was unavailable: {row.get('filename')}"
                         )
+                        omitted_attachment_ids.setdefault(name, []).append(str(row["id"]))
+                        row["storage_key"] = None
+                        rows_with_files.append(row)
                         continue
                     attachment_name = sanitize_filename(row.get("filename") or "attachment")
                     prefix = (
@@ -616,6 +631,7 @@ async def build_backup_zip(
             "content": content.value,
             "entity_counts": entity_counts,
             "warnings": warnings,
+            "omitted_attachment_ids": omitted_attachment_ids,
         }
         zf.writestr("metadata.json", json.dumps(metadata, indent=2, ensure_ascii=False))
 
@@ -634,6 +650,40 @@ def _metadata_from_zip(zf: zipfile.ZipFile) -> tuple[dict[str, Any], list[str]]:
         raise ValueError("metadata warnings must contain a JSON array")
     warnings.extend(str(warning) for warning in metadata_warnings)
     return metadata, warnings
+
+
+def _attachment_ids_without_files(
+    zf: zipfile.ZipFile,
+    metadata: dict[str, Any],
+    names: list[str],
+) -> dict[str, set[str]]:
+    raw = metadata.get("omitted_attachment_ids") or {}
+    if not isinstance(raw, dict):
+        raise ValueError("omitted_attachment_ids must contain a JSON object")
+    archive_names = set(zf.namelist())
+    missing_by_entity: dict[str, set[str]] = {}
+    for name, raw_ids in raw.items():
+        if name not in ATTACHMENT_ENTITY_NAMES or not isinstance(raw_ids, list):
+            raise ValueError("Invalid omitted attachment metadata")
+        for value in raw_ids:
+            uuid.UUID(str(value))
+
+    for name in ATTACHMENT_ENTITY_NAMES.intersection(names):
+        rows = _read_json_file(zf, name)
+        rows_by_id = {str(row.get("id")): row for row in rows if row.get("id") is not None}
+        declared = {str(value) for value in raw.get(name, [])}
+        if not declared.issubset(rows_by_id):
+            raise ValueError(f"Omitted {name} metadata references an unknown row")
+        missing = {
+            row_id
+            for row_id, row in rows_by_id.items()
+            if not row.get("backup_path") or row["backup_path"] not in archive_names
+        }
+        if not declared.issubset(missing):
+            raise ValueError(f"Omitted {name} metadata references an available file")
+        if missing:
+            missing_by_entity[name] = missing
+    return missing_by_entity
 
 
 def _metadata_from_zip_bytes(data: bytes) -> tuple[dict[str, Any], list[str]]:
@@ -1092,23 +1142,31 @@ async def _clear_workspace_entities(
     workspace_id: uuid.UUID,
     names: list[str],
     id_maps: RestoreIdMaps,
-) -> tuple[list[str], list[PreservedReference]]:
+    attachment_ids_without_files: dict[str, set[str]],
+) -> tuple[list[str], list[PreservedReference], dict[tuple[str, str], str]]:
     name_set = set(names)
     archived_ids = set(id_maps.flat_entities)
     stale_storage_keys: list[str] = []
     preserved_references: list[PreservedReference] = []
-    attachment_models = []
+    preserved_attachment_keys: dict[tuple[str, str], str] = {}
+    attachment_models: list[tuple[str, Any]] = []
     if "transaction_attachments" in name_set:
-        attachment_models.append(TransactionAttachment)
+        attachment_models.append(("transaction_attachments", TransactionAttachment))
     if "invoice_attachments" in name_set:
-        attachment_models.append(InvoiceAttachment)
-    for attachment_model in attachment_models:
+        attachment_models.append(("invoice_attachments", InvoiceAttachment))
+    for attachment_name, attachment_model in attachment_models:
         result = await session.execute(
-            select(attachment_model.storage_key).where(
+            select(attachment_model.id, attachment_model.storage_key).where(
                 attachment_model.workspace_id == workspace_id
             )
         )
-        stale_storage_keys.extend(result.scalars().all())
+        preserved_ids = attachment_ids_without_files.get(attachment_name, set())
+        for attachment_id, storage_key in result.all():
+            source_id = str(attachment_id)
+            if source_id in preserved_ids:
+                preserved_attachment_keys[(attachment_name, source_id)] = storage_key
+            else:
+                stale_storage_keys.append(storage_key)
 
     # Configuration-only restores replace referenced rows while leaving data
     # entities in place. Preserve links to rows carried by the archive, clear
@@ -1301,7 +1359,11 @@ async def _clear_workspace_entities(
         await session.execute(
             delete(dynamic_model).where(dynamic_model.workspace_id == workspace_id)
         )
-    return list(dict.fromkeys(stale_storage_keys)), preserved_references
+    return (
+        list(dict.fromkeys(stale_storage_keys)),
+        preserved_references,
+        preserved_attachment_keys,
+    )
 
 
 async def _restore_preserved_references(
@@ -1439,6 +1501,7 @@ async def restore_backup_bytes(
     storage_changes: list[tuple[str, bytes | None, str]] = []
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
+            metadata, _ = _metadata_from_zip(zf)
             names = _archive_entity_names(zf, selected_names)
             missing_names = [name for name in selected_names if name not in names]
             if missing_names:
@@ -1450,8 +1513,10 @@ async def restore_backup_bytes(
             # Parse every selected entity file before a current-workspace restore
             # starts deleting rows. This also validates that each payload is a list.
             id_map = _build_id_map(zf, names, remap=remap)
+            attachment_ids_without_files = _attachment_ids_without_files(zf, metadata, names)
             stale_storage_keys: list[str] = []
             preserved_references: list[PreservedReference] = []
+            preserved_attachment_keys: dict[tuple[str, str], str] = {}
             if mode == BackupRestoreMode.new_workspace:
                 user = await session.get(User, target_user_id)
                 if user is None:
@@ -1478,11 +1543,16 @@ async def restore_backup_bytes(
                     target_workspace.id,
                     target_user_id,
                 )
-                stale_storage_keys, preserved_references = await _clear_workspace_entities(
+                (
+                    stale_storage_keys,
+                    preserved_references,
+                    preserved_attachment_keys,
+                ) = await _clear_workspace_entities(
                     session,
                     target_workspace.id,
                     names,
                     id_map,
+                    attachment_ids_without_files,
                 )
 
             uploaded_logo_ids: set[str] = set()
@@ -1518,6 +1588,7 @@ async def restore_backup_bytes(
                                     "Invoice logo skipped because backup data is "
                                     f"missing: {logo_id}"
                                 )
+                                _clear_invoice_logo_reference(name, row)
                                 continue
                             logo_key = invoice_logo_service.storage_key(
                                 target_workspace.id, uuid.UUID(logo_id)
@@ -1532,11 +1603,32 @@ async def restore_backup_bytes(
                             await storage.upload(logo_key, zf.read(backup_path), "image/png")
                             uploaded_logo_ids.add(logo_id)
 
-                if name in {"transaction_attachments", "invoice_attachments"}:
+                if name in ATTACHMENT_ENTITY_NAMES:
                     count = 0
                     for row in rows:
                         backup_path = row.get("backup_path")
                         if not backup_path or backup_path not in zf.namelist():
+                            source_id = str(row.get("id"))
+                            preserved_key = preserved_attachment_keys.get((name, source_id))
+                            if preserved_key is not None:
+                                prepared = _prepare_model_data(
+                                    model,
+                                    row,
+                                    id_maps=id_map,
+                                    target_workspace_id=target_workspace.id,
+                                    target_user_id=target_user_id,
+                                    remap=remap,
+                                    owned_reference_ids=owned_reference_ids,
+                                    workspace_user_ids=workspace_user_ids,
+                                )
+                                prepared["storage_key"] = preserved_key
+                                session.add(model(**prepared))
+                                count += 1
+                                warnings.append(
+                                    "Attachment metadata preserved although its stored file was "
+                                    f"unavailable: {row.get('filename')}"
+                                )
+                                continue
                             warnings.append(
                                 "Attachment skipped because backup data is missing: "
                                 f"{row.get('filename')}"

@@ -977,6 +977,63 @@ async def test_failed_current_restore_keeps_existing_attachment_file(
 
 
 @pytest.mark.asyncio
+async def test_current_restore_preserves_attachment_metadata_when_file_is_unavailable(
+    session: AsyncSession,
+    test_user: User,
+    test_workspace: Workspace,
+    test_transactions: list[Transaction],
+):
+    storage = get_storage_provider()
+    stored = await storage.upload(
+        f"{test_workspace.id}/transactions/missing.txt",
+        b"temporarily unavailable",
+        "text/plain",
+    )
+    attachment = TransactionAttachment(
+        transaction_id=test_transactions[0].id,
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        filename="missing.txt",
+        storage_key=stored.storage_key,
+        content_type=stored.content_type,
+        size=stored.size,
+    )
+    session.add(attachment)
+    await session.commit()
+    attachment_id = attachment.id
+    storage_key = attachment.storage_key
+    await storage.delete(storage_key)
+
+    data = await backup_service.build_backup_zip(session, test_workspace)
+    with zipfile.ZipFile(io.BytesIO(data)) as zf:
+        metadata = json.loads(zf.read("metadata.json"))
+        rows = json.loads(zf.read("transaction_attachments.json"))
+        assert metadata["omitted_attachment_ids"] == {
+            "transaction_attachments": [str(attachment_id)]
+        }
+        assert rows[0]["id"] == str(attachment_id)
+        assert rows[0]["storage_key"] is None
+        assert "backup_path" not in rows[0]
+
+    result = await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+
+    session.expire_all()
+    restored = await session.get(TransactionAttachment, attachment_id)
+    assert restored is not None
+    assert restored.storage_key == storage_key
+    assert result.restored_counts["transaction_attachments"] == 1
+    assert any("metadata preserved" in warning for warning in result.warnings)
+
+
+@pytest.mark.asyncio
 async def test_backup_round_trip_invoices_products_and_files(
     session: AsyncSession,
     test_user,
@@ -1094,6 +1151,40 @@ async def test_backup_round_trip_invoices_products_and_files(
     assert uuid.UUID(hex=restored_key_uuid)
     assert await storage.download(restored_attachment.storage_key) == attachment_data
     assert await invoice_logo_service.read(result.workspace_id, logo_id) == logo_data
+
+    without_logo = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(data)) as source,
+        zipfile.ZipFile(without_logo, "w", zipfile.ZIP_DEFLATED) as target,
+    ):
+        for info in source.infolist():
+            if info.filename != f"invoice_logos/{logo_id}.png":
+                target.writestr(info, source.read(info.filename))
+
+    missing_logo_result = await backup_service.restore_backup_bytes(
+        session,
+        data=without_logo.getvalue(),
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.new_workspace,
+    )
+    missing_logo_settings = (
+        await session.execute(
+            select(InvoiceSettings).where(
+                InvoiceSettings.workspace_id == missing_logo_result.workspace_id
+            )
+        )
+    ).scalar_one()
+    missing_logo_invoice = (
+        await session.execute(
+            select(Invoice).where(Invoice.workspace_id == missing_logo_result.workspace_id)
+        )
+    ).scalar_one()
+    assert missing_logo_settings.logo_id is None
+    assert missing_logo_invoice.snapshot is not None
+    assert missing_logo_invoice.snapshot["issuer"]["logo_id"] is None
+    assert any("Invoice logo skipped" in warning for warning in missing_logo_result.warnings)
 
 
 @pytest.mark.asyncio

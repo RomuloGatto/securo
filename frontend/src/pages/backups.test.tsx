@@ -113,13 +113,28 @@ describe('BackupPage', () => {
 
     await user.upload(input, new File(['first'], 'first.zip', { type: 'application/zip' }))
     await user.upload(input, new File(['second'], 'second.zip', { type: 'application/zip' }))
+    const restoreButton = screen.getByRole('button', { name: t('backup.restore') })
+    expect(restoreButton).toBeDisabled()
 
     await act(async () => secondRequest.resolve(preview('Workspace B')))
     expect(await screen.findByText('Workspace B')).toBeInTheDocument()
+    expect(restoreButton).toBeEnabled()
 
     await act(async () => firstRequest.resolve(preview('Workspace A')))
     expect(screen.getByText('Workspace B')).toBeInTheDocument()
     expect(screen.queryByText('Workspace A')).not.toBeInTheDocument()
+  })
+
+  it('keeps restore disabled when upload preview fails', async () => {
+    api.previewUpload.mockRejectedValue(new Error('invalid backup'))
+    const { container, user } = renderWithProviders(<BackupPage />)
+    const input = container.querySelector('input[type="file"]') as HTMLInputElement
+
+    await user.upload(input, new File(['invalid'], 'invalid.zip', { type: 'application/zip' }))
+
+    const restoreButton = screen.getByRole('button', { name: t('backup.restore') })
+    await waitFor(() => expect(api.previewUpload).toHaveBeenCalledTimes(1))
+    expect(restoreButton).toBeDisabled()
   })
 
   it('shows a retryable error instead of an empty list when loading stored backups fails', async () => {
