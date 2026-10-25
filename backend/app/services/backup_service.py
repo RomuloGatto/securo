@@ -1557,14 +1557,13 @@ async def restore_backup_bytes(
                         if name == "transaction_attachments":
                             parent_id = prepared["transaction_id"]
                             storage_key = (
-                                f"{target_workspace.id}/{parent_id}/"
-                                f"{uuid.uuid4().hex[:8]}_{filename}"
+                                f"{target_workspace.id}/{parent_id}/{uuid.uuid4().hex}_{filename}"
                             )
                         else:
                             parent_id = prepared["invoice_id"]
                             storage_key = (
                                 f"{target_workspace.id}/invoices/{parent_id}/"
-                                f"{uuid.uuid4().hex[:8]}_{filename}"
+                                f"{uuid.uuid4().hex}_{filename}"
                             )
                         content_type = prepared.get("content_type") or "application/octet-stream"
                         storage_changes.append((storage_key, None, content_type))

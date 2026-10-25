@@ -1089,6 +1089,9 @@ async def test_backup_round_trip_invoices_products_and_files(
     assert restored_line.invoice_id == restored_invoice.id
     assert restored_line.product_id == restored_product.id
     assert restored_line.price_id == restored_price.id
+    restored_key_uuid = restored_attachment.storage_key.rsplit("/", 1)[-1].split("_", 1)[0]
+    assert len(restored_key_uuid) == 32
+    assert uuid.UUID(hex=restored_key_uuid)
     assert await storage.download(restored_attachment.storage_key) == attachment_data
     assert await invoice_logo_service.read(result.workspace_id, logo_id) == logo_data
 
