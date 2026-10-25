@@ -96,13 +96,18 @@ describe('BackupPage', () => {
   })
 
   it('shows a retryable error and disables scheduling when configuration loading fails', async () => {
-    api.getConfig.mockRejectedValue(new Error('network unavailable'))
+    api.getConfig
+      .mockRejectedValueOnce(new Error('network unavailable'))
+      .mockResolvedValueOnce(config)
     const { user } = renderWithProviders(<BackupPage />)
 
     expect(await screen.findByText(t('backup.configLoadError'))).toBeInTheDocument()
-    expect(screen.getByRole('switch', { name: t('backup.scheduleTitle') })).toBeDisabled()
-    await user.click(screen.getAllByRole('button', { name: t('common.retry') })[0])
-    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2))
+    const scheduleSwitch = screen.getByRole('switch', { name: t('backup.scheduleTitle') })
+    expect(scheduleSwitch).toBeDisabled()
+    await user.click(screen.getByRole('button', { name: t('common.retry') }))
+    await waitFor(() => expect(screen.queryByText(t('backup.configLoadError'))).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('button', { name: t('common.save') })).toBeEnabled())
+    expect(scheduleSwitch).toBeEnabled()
   })
 
   it('keeps unsaved edits when an identical config refetch completes', async () => {
