@@ -2564,6 +2564,7 @@
     },
     "counts": {
       "empty": "0 položiek",
+      "total": "Celkom: {{count}}",
       "accounts_one": "{{count}} účet",
       "accounts_few": "{{count}} účty",
       "accounts_many": "{{count}} účtov",
@@ -2599,6 +2600,7 @@
     "unknownWorkspace": "Neznámy pracovný priestor",
     "running": "Prebieha…",
     "emptyStored": "Zatiaľ nie sú uložené žiadne zálohy. Spusti zálohovanie teraz alebo povoľ plán.",
+    "listError": "Uložené zálohy sa nepodarilo načítať.",
     "downloadNow": "Stiahnuť ZIP",
     "subtitle": "Exportuj, plánuj a obnovuj zálohy pracovného priestoru bez prihlasovacích údajov používateľov a bánk.",
     "restoreMode": {

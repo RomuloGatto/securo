@@ -2432,6 +2432,7 @@
     },
     "counts": {
       "empty": "0 elementi",
+      "total": "Totale: {{count}}",
       "accounts_one": "{{count}} conto",
       "accounts_many": "{{count}} conti",
       "accounts_other": "{{count}} conti",
@@ -2461,6 +2462,7 @@
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",
+    "listError": "Impossibile caricare i backup archiviati.",
     "downloadNow": "Download ZIP",
     "subtitle": "Export, schedule, and restore workspace backups without auth or bank credentials.",
     "restoreMode": {

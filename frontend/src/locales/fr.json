@@ -2446,6 +2446,7 @@
     "storedTitle": "Stored backups",
     "storedDescription": "Backups created by “Run backup” or the schedule for this workspace.",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",
+    "listError": "Impossible de charger les sauvegardes stockées.",
     "uploadTitle": "Restore from upload",
     "uploadDescription": "Upload a Securo backup ZIP, preview it, then restore to a new workspace by default.",
     "previewing": "Reading backup…",
@@ -2474,6 +2475,7 @@
     },
     "counts": {
       "empty": "0 élément",
+      "total": "Total : {{count}}",
       "accounts_one": "{{count}} compte",
       "accounts_many": "{{count}} comptes",
       "accounts_other": "{{count}} comptes",

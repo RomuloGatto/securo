@@ -2432,6 +2432,7 @@
     },
     "counts": {
       "empty": "0 elementos",
+      "total": "Total: {{count}}",
       "accounts_one": "{{count}} cuenta",
       "accounts_many": "{{count}} cuentas",
       "accounts_other": "{{count}} cuentas",
@@ -2461,6 +2462,7 @@
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",
+    "listError": "No se pudieron cargar las copias de seguridad almacenadas.",
     "downloadNow": "Download ZIP",
     "subtitle": "Export, schedule, and restore workspace backups without auth or bank credentials.",
     "restoreMode": {

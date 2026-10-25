@@ -5,6 +5,8 @@ import zipfile
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import HTTPException
@@ -27,6 +29,7 @@ from app.models.recurring_transaction import RecurringTransaction
 from app.models.rule import Rule
 from app.models.transaction import Transaction
 from app.models.transaction_attachment import TransactionAttachment
+from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.providers import get_storage_provider
 from app.services import backup_service, invoice_logo_service
@@ -1090,3 +1093,230 @@ async def test_backup_round_trip_invoices_products_and_files(
     assert restored_line.price_id == restored_price.id
     assert await storage.download(restored_attachment.storage_key) == attachment_data
     assert await invoice_logo_service.read(result.workspace_id, logo_id) == logo_data
+
+
+@pytest.mark.asyncio
+async def test_current_restore_preserves_workspace_member_attribution(
+    session: AsyncSession,
+    test_user: User,
+    test_workspace: Workspace,
+    test_account: Account,
+):
+    second_user = User(
+        email="backup-member@example.com",
+        hashed_password="not-used",
+        is_active=True,
+        is_superuser=False,
+        is_verified=True,
+    )
+    session.add(second_user)
+    await session.flush()
+    session.add(
+        WorkspaceMember(
+            workspace_id=test_workspace.id,
+            user_id=second_user.id,
+            role="editor",
+            invited_by_user_id=test_user.id,
+        )
+    )
+    session.add_all(
+        [
+            Group(
+                workspace_id=test_workspace.id,
+                user_id=test_user.id,
+                name="Shared name",
+            ),
+            Group(
+                workspace_id=test_workspace.id,
+                user_id=second_user.id,
+                name="Shared name",
+            ),
+            RecurringTransaction(
+                workspace_id=test_workspace.id,
+                user_id=test_user.id,
+                account_id=test_account.id,
+                description="Shared schedule",
+                amount=Decimal("10.00"),
+                currency="USD",
+                type="debit",
+                frequency="monthly",
+                start_date=date(2026, 1, 1),
+                next_occurrence=date(2026, 11, 1),
+            ),
+            RecurringTransaction(
+                workspace_id=test_workspace.id,
+                user_id=second_user.id,
+                account_id=test_account.id,
+                description="Shared schedule",
+                amount=Decimal("10.00"),
+                currency="USD",
+                type="debit",
+                frequency="monthly",
+                start_date=date(2026, 1, 1),
+                next_occurrence=date(2026, 11, 1),
+            ),
+        ]
+    )
+    await session.commit()
+
+    data = await backup_service.build_backup_zip(session, test_workspace)
+    await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+
+    group_owners = set(
+        (
+            await session.execute(
+                select(Group.user_id).where(
+                    Group.workspace_id == test_workspace.id,
+                    Group.name == "Shared name",
+                )
+            )
+        ).scalars()
+    )
+    recurring_owners = set(
+        (
+            await session.execute(
+                select(RecurringTransaction.user_id).where(
+                    RecurringTransaction.workspace_id == test_workspace.id,
+                    RecurringTransaction.description == "Shared schedule",
+                )
+            )
+        ).scalars()
+    )
+    assert group_owners == {test_user.id, second_user.id}
+    assert recurring_owners == {test_user.id, second_user.id}
+
+    new_workspace = await backup_service.restore_backup_bytes(
+        session,
+        data=data,
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.new_workspace,
+    )
+    restored_groups = (
+        (
+            await session.execute(
+                select(Group).where(Group.workspace_id == new_workspace.workspace_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    restored_recurring = (
+        (
+            await session.execute(
+                select(RecurringTransaction).where(
+                    RecurringTransaction.workspace_id == new_workspace.workspace_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {group.user_id for group in restored_groups} == {test_user.id}
+    assert len({group.name for group in restored_groups}) == 2
+    assert {recurring.user_id for recurring in restored_recurring} == {test_user.id}
+    assert len({recurring.description for recurring in restored_recurring}) == 2
+    assert any("single owner" in warning for warning in new_workspace.warnings)
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_rule_action_referencing_foreign_workspace_payee(
+    session: AsyncSession,
+    test_user: User,
+    test_workspace: Workspace,
+):
+    rule = Rule(
+        user_id=test_user.id,
+        workspace_id=test_workspace.id,
+        name="Unsafe restored rule",
+        conditions_op="and",
+        conditions=[],
+        actions=[],
+    )
+    foreign_workspace = Workspace(name="Foreign workspace", created_by_user_id=test_user.id)
+    session.add_all([rule, foreign_workspace])
+    await session.flush()
+    foreign_payee = Payee(
+        user_id=test_user.id,
+        workspace_id=foreign_workspace.id,
+        name="Foreign payee",
+    )
+    session.add(foreign_payee)
+    await session.commit()
+
+    valid_data = await backup_service.build_backup_zip(
+        session,
+        test_workspace,
+        content=backup_service.BackupContent.configuration,
+    )
+    corrupted = io.BytesIO()
+    with (
+        zipfile.ZipFile(io.BytesIO(valid_data)) as source,
+        zipfile.ZipFile(corrupted, "w", zipfile.ZIP_DEFLATED) as target,
+    ):
+        for info in source.infolist():
+            payload = source.read(info.filename)
+            if info.filename == "rules.json":
+                rows = json.loads(payload)
+                rows[0]["actions"] = [{"op": "set_payee", "value": str(foreign_payee.id)}]
+                payload = json.dumps(rows).encode()
+            target.writestr(info, payload)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await backup_service.restore_backup_bytes(
+            session,
+            data=corrupted.getvalue(),
+            target_user_id=test_user.id,
+            current_workspace=test_workspace,
+            content=backup_service.BackupContent.configuration,
+            mode=backup_service.BackupRestoreMode.current_workspace,
+            confirmation="RESTORE",
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "Payee not found" in str(exc_info.value.detail)
+
+
+@pytest.mark.asyncio
+async def test_scheduled_backup_failure_rolls_back_before_next_workspace(monkeypatch):
+    workspace_ids = [uuid.uuid4(), uuid.uuid4()]
+    settings = [
+        SimpleNamespace(key=backup_service._config_key(workspace_id))
+        for workspace_id in workspace_ids
+    ]
+    execute_result = MagicMock()
+    execute_result.scalars.return_value.all.return_value = settings
+    fake_session = MagicMock()
+    fake_session.execute = AsyncMock(return_value=execute_result)
+    fake_session.get = AsyncMock(
+        side_effect=[
+            SimpleNamespace(id=workspace_ids[0], is_archived=False),
+            SimpleNamespace(id=workspace_ids[1], is_archived=False),
+        ]
+    )
+    fake_session.rollback = AsyncMock()
+    config = SimpleNamespace(
+        scheduled_enabled=True,
+        last_run_at=None,
+        schedule="daily",
+        content=backup_service.BackupContent.both,
+    )
+    monkeypatch.setattr(backup_service, "get_backup_config", AsyncMock(return_value=config))
+    create_backup = AsyncMock(side_effect=[RuntimeError("first failed"), None])
+    monkeypatch.setattr(backup_service, "create_stored_backup", create_backup)
+    monkeypatch.setattr(backup_service.get_settings(), "backup_storage_shared", True)
+
+    result = await backup_service.run_scheduled_backups(fake_session)
+
+    assert result == {"created": 1, "skipped": 0, "errors": ["first failed"]}
+    fake_session.rollback.assert_awaited_once()
+    assert create_backup.await_count == 2

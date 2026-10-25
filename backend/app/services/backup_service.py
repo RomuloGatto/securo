@@ -60,7 +60,7 @@ from app.models.transaction_attachment import TransactionAttachment
 from app.models.transaction_split import TransactionSplit
 from app.models.workspace import Workspace, WorkspaceMember, WorkspaceTaxId
 from app.providers import get_storage_provider
-from app.services import invoice_logo_service, workspace_service
+from app.services import invoice_logo_service, rule_service, workspace_service
 from app.services.attachment_service import sanitize_filename
 from app.schemas.backup import (
     BackupConfig,
@@ -1005,7 +1005,14 @@ def _prepare_model_data(
             "verified_by",
             "resolved_by",
         }:
-            rewritten = str(target_user_id) if value is not None else None
+            # Existing-workspace restores retain valid member attribution. New
+            # workspaces intentionally collapse authorship to their sole owner.
+            if value is None:
+                rewritten = None
+            elif str(value) in workspace_user_ids:
+                rewritten = value
+            else:
+                rewritten = str(target_user_id)
         elif model is AssetGroup and key == "external_id" and remap:
             # Provider wallet identities are user-scoped. A restored copy has
             # no live provider connection and must not collide with the source.
@@ -1072,7 +1079,9 @@ def _prepare_model_data(
     if "workspace_id" in columns:
         data["workspace_id"] = target_workspace_id
     if "user_id" in columns:
-        data["user_id"] = target_user_id
+        user_column = columns["user_id"]
+        if "user_id" not in data or (data["user_id"] is None and not user_column.nullable):
+            data["user_id"] = target_user_id
     if "connection_id" in columns:
         data["connection_id"] = None
     return data
@@ -1362,6 +1371,45 @@ async def _undo_restore_storage_changes(
             logger.exception("Could not roll back restored storage object %s", key)
 
 
+def _deduplicate_collapsed_user_scope(
+    model: Any,
+    data: dict[str, Any],
+    seen: dict[str, set[tuple[Any, ...]]],
+) -> bool:
+    """Keep a single-owner new workspace valid without inviting source users."""
+    if model is Group:
+        label_field = "name"
+        key_fields = ("name",)
+        max_length = 100
+    elif model is RecurringTransaction:
+        label_field = "description"
+        key_fields = ("description", "frequency", "start_date")
+        max_length = 500
+    else:
+        return False
+
+    table_name = model.__table__.name
+    table_keys = seen.setdefault(table_name, set())
+    original_label = str(data[label_field])
+
+    def unique_key() -> tuple[Any, ...]:
+        return tuple(data[field] for field in key_fields)
+
+    key = unique_key()
+    if key not in table_keys:
+        table_keys.add(key)
+        return False
+
+    index = 2
+    while key in table_keys:
+        suffix = f" (restored {index})"
+        data[label_field] = original_label[: max_length - len(suffix)] + suffix
+        key = unique_key()
+        index += 1
+    table_keys.add(key)
+    return True
+
+
 async def restore_backup_bytes(
     session: AsyncSession,
     *,
@@ -1438,6 +1486,8 @@ async def restore_backup_bytes(
                 )
 
             uploaded_logo_ids: set[str] = set()
+            collapsed_scope_keys: dict[str, set[tuple[Any, ...]]] = {}
+            renamed_user_scoped_entities: set[str] = set()
             for name in RESTORE_ORDER:
                 if name not in names:
                     continue
@@ -1569,6 +1619,22 @@ async def restore_backup_bytes(
                         owned_reference_ids=owned_reference_ids,
                         workspace_user_ids=workspace_user_ids,
                     )
+                    if model is Rule:
+                        await rule_service.validate_rule_definition(
+                            session,
+                            target_workspace.id,
+                            prepared.get("conditions") or [],
+                            prepared.get("actions") or [],
+                        )
+                    if remap and _deduplicate_collapsed_user_scope(
+                        model, prepared, collapsed_scope_keys
+                    ):
+                        if name not in renamed_user_scoped_entities:
+                            warnings.append(
+                                f"Renamed duplicate {name.replace('_', ' ')} because the restored "
+                                "workspace has a single owner."
+                            )
+                            renamed_user_scoped_entities.add(name)
                     session.add(model(**prepared))
                     count += 1
                 restored_counts[name] = count
@@ -1640,5 +1706,6 @@ async def run_scheduled_backups(session: AsyncSession) -> dict[str, Any]:
             )
             created += 1
         except Exception as exc:
+            await session.rollback()
             errors.append(str(exc))
     return {"created": created, "skipped": skipped, "errors": errors}

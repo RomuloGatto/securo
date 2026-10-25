@@ -2432,6 +2432,7 @@
     },
     "counts": {
       "empty": "0 itens",
+      "total": "Total: {{count}}",
       "accounts_one": "{{count}} conta",
       "accounts_many": "{{count}} contas",
       "accounts_other": "{{count}} contas",
@@ -2461,6 +2462,7 @@
     "unknownWorkspace": "Workspace desconhecido",
     "running": "Executando…",
     "emptyStored": "Nenhum backup armazenado ainda. Execute agora ou habilite o agendamento.",
+    "listError": "Não foi possível carregar os backups armazenados.",
     "downloadNow": "Baixar ZIP",
     "subtitle": "Exporte, agende e restaure backups do workspace sem autenticação nem credenciais bancárias.",
     "restoreMode": {

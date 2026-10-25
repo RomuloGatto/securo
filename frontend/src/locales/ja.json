@@ -2428,6 +2428,7 @@
     },
     "counts": {
       "empty": "0件",
+      "total": "合計: {{count}}",
       "accounts_one": "{{count}}件の口座",
       "accounts_other": "{{count}}件の口座",
       "transactions_one": "{{count}}件の取引",
@@ -2451,6 +2452,7 @@
     "unknownWorkspace": "不明なワークスペース",
     "running": "実行中…",
     "emptyStored": "保存済みのバックアップはまだありません。今すぐ実行するか、スケジュールを有効にしてください。",
+    "listError": "保存済みバックアップを読み込めませんでした。",
     "downloadNow": "ZIPをダウンロード",
     "subtitle": "認証情報や銀行の接続情報を含めずに、ワークスペースのバックアップのエクスポート、スケジュール設定、復元を行います。",
     "restoreMode": {

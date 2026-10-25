@@ -2445,6 +2445,7 @@
     },
     "counts": {
       "empty": "0 елементів",
+      "total": "Усього: {{count}}",
       "accounts_one": "{{count}} рахунок",
       "accounts_few": "{{count}} рахунки",
       "accounts_many": "{{count}} рахунків",
@@ -2480,6 +2481,7 @@
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",
+    "listError": "Не вдалося завантажити збережені резервні копії.",
     "downloadNow": "Download ZIP",
     "subtitle": "Export, schedule, and restore workspace backups without auth or bank credentials.",
     "restoreMode": {

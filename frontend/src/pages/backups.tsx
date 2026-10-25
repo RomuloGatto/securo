@@ -77,10 +77,11 @@ function countSummary(counts: Record<string, number>, t: TFunction): string {
   const important = ['accounts', 'transactions', 'categories', 'rules', 'budgets', 'goals']
     .map((key) => [key, counts[key] ?? 0] as const)
     .filter(([, count]) => count > 0)
-  if (!important.length) return t('backup.counts.empty')
-  return important
-    .map(([key, count]) => t(`backup.counts.${key}`, { count }))
-    .join(' · ')
+  const total = Object.values(counts).reduce((sum, count) => sum + count, 0)
+  const details = important.length
+    ? important.map(([key, count]) => t(`backup.counts.${key}`, { count })).join(' · ')
+    : t('backup.counts.empty')
+  return `${t('backup.counts.total', { count: total })} · ${details}`
 }
 
 function formatDate(value: string | null, locale: string): string {
@@ -137,11 +138,13 @@ export default function BackupPage() {
 
   const [runContent, setRunContent] = useState<BackupContent>('both')
   const [scheduledEnabled, setScheduledEnabled] = useState(false)
+  const [hydratedConfigUpdatedAt, setHydratedConfigUpdatedAt] = useState(0)
   const [schedule, setSchedule] = useState<'daily' | 'weekly'>('daily')
   const [configContent, setConfigContent] = useState<BackupContent>('both')
   const [retentionCount, setRetentionCount] = useState('10')
   const [retentionDays, setRetentionDays] = useState('')
   const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const uploadFileRef = useRef<File | null>(null)
   const [uploadPreview, setUploadPreview] = useState<BackupPreview | null>(null)
   const [uploadContent, setUploadContent] = useState<BackupContent>('both')
   const [uploadMode, setUploadMode] = useState<BackupRestoreMode>('new_workspace')
@@ -171,7 +174,8 @@ export default function BackupPage() {
     setConfigContent(cfg.content)
     setRetentionCount(String(cfg.retention_count))
     setRetentionDays(cfg.retention_days ? String(cfg.retention_days) : '')
-  }, [configQuery.data])
+    setHydratedConfigUpdatedAt(configQuery.dataUpdatedAt)
+  }, [configQuery.data, configQuery.dataUpdatedAt])
 
   const invalidateBackups = () => {
     void queryClient.invalidateQueries({ queryKey: ['backups'] })
@@ -220,11 +224,13 @@ export default function BackupPage() {
 
   const previewUploadMutation = useMutation({
     mutationFn: (file: File) => backupApi.previewUpload(file),
-    onSuccess: (preview) => {
+    onSuccess: (preview, file) => {
+      if (uploadFileRef.current !== file) return
       setUploadPreview(preview)
       setUploadContent(preview.content)
     },
-    onError: (error) => {
+    onError: (error, file) => {
+      if (uploadFileRef.current !== file) return
       setUploadPreview(null)
       showError(error, t('backup.previewError'))
     },
@@ -242,6 +248,7 @@ export default function BackupPage() {
     onSuccess: async (result) => {
       toast.success(t('backup.restoreSuccess', { name: result.workspace_name }))
       setUploadFile(null)
+      uploadFileRef.current = null
       setUploadPreview(null)
       setUploadConfirmation('')
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -351,6 +358,7 @@ export default function BackupPage() {
                 onChange={(e) => {
                   const file = e.target.files?.[0] ?? null
                   setUploadFile(file)
+                  uploadFileRef.current = file
                   setUploadPreview(null)
                   if (file) previewUploadMutation.mutate(file)
                 }}
@@ -467,7 +475,16 @@ export default function BackupPage() {
               <span><span className="font-medium text-foreground/80">{t('backup.lastRun')}:</span> {formatDate(configQuery.data?.last_run_at ?? null, dateLocale)}</span>
               <span><span className="font-medium text-foreground/80">{t('backup.nextRun')}:</span> {formatDate(configQuery.data?.next_run_at ?? null, dateLocale)}</span>
             </div>
-            <Button size="sm" className="h-8 shrink-0" onClick={() => saveConfigMutation.mutate()} disabled={saveConfigMutation.isPending}>
+            <Button
+              size="sm"
+              className="h-8 shrink-0"
+              onClick={() => saveConfigMutation.mutate()}
+              disabled={
+                saveConfigMutation.isPending ||
+                !configQuery.data ||
+                hydratedConfigUpdatedAt !== configQuery.dataUpdatedAt
+              }
+            >
               <Save className="h-3.5 w-3.5" />
               {t('common.save')}
             </Button>
@@ -497,6 +514,14 @@ export default function BackupPage() {
           {backupsQuery.isLoading ? (
             <div className="flex min-h-20 items-center justify-center rounded-lg border border-dashed bg-muted/10 px-4 py-5 text-center text-sm text-muted-foreground">
               {t('common.loading')}
+            </div>
+          ) : backupsQuery.isError ? (
+            <div className="flex min-h-20 flex-col items-center justify-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-5 text-center text-sm text-destructive">
+              <span>{t('backup.listError')}</span>
+              <Button variant="outline" size="sm" onClick={() => backupsQuery.refetch()}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t('common.retry')}
+              </Button>
             </div>
           ) : backups.length === 0 ? (
             <div className="flex min-h-20 items-center justify-center rounded-lg border border-dashed bg-muted/10 px-4 py-5 text-center text-sm text-muted-foreground">

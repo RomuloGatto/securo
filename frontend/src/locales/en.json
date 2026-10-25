@@ -2428,6 +2428,7 @@
     },
     "counts": {
       "empty": "0 items",
+      "total": "Total: {{count}}",
       "accounts_one": "{{count}} account",
       "accounts_other": "{{count}} accounts",
       "transactions_one": "{{count}} transaction",
@@ -2451,6 +2452,7 @@
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
     "emptyStored": "No stored backups yet. Run one now or enable the schedule.",
+    "listError": "Could not load stored backups.",
     "downloadNow": "Download ZIP",
     "subtitle": "Export, schedule, and restore workspace backups without auth or bank credentials.",
     "restoreMode": {

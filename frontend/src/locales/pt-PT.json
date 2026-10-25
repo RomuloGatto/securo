@@ -2446,6 +2446,7 @@
     "storedTitle": "Backups armazenados",
     "storedDescription": "Backups criados por “Executar backup” ou pelo agendamento deste workspace.",
     "emptyStored": "Nenhum backup armazenado ainda. Execute agora ou habilite o agendamento.",
+    "listError": "Não foi possível carregar as cópias de segurança armazenadas.",
     "uploadTitle": "Restaurar por upload",
     "uploadDescription": "Envie um ZIP de backup do Securo, visualize e restaure em um novo workspace por padrão.",
     "previewing": "Lendo backup…",
@@ -2474,6 +2475,7 @@
     },
     "counts": {
       "empty": "0 itens",
+      "total": "Total: {{count}}",
       "accounts_one": "{{count}} conta",
       "accounts_many": "{{count}} contas",
       "accounts_other": "{{count}} contas",

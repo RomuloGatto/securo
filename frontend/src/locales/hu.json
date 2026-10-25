@@ -2428,6 +2428,7 @@
     },
     "counts": {
       "empty": "0 elem",
+      "total": "Összesen: {{count}}",
       "accounts_one": "{{count}} számla",
       "accounts_other": "{{count}} számla",
       "transactions_one": "{{count}} tranzakció",
@@ -2451,6 +2452,7 @@
     "unknownWorkspace": "Ismeretlen munkaterület",
     "running": "Folyamatban…",
     "emptyStored": "Még nincsenek tárolt biztonsági mentések. Indíts egyet most, vagy engedélyezd az ütemezést.",
+    "listError": "A tárolt biztonsági mentések nem tölthetők be.",
     "downloadNow": "ZIP letöltése",
     "subtitle": "Munkaterület biztonsági mentéseinek exportálása, ütemezése és visszaállítása felhasználói hitelesítési és banki hozzáférési adatok nélkül.",
     "restoreMode": {

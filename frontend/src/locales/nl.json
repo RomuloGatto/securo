@@ -2430,6 +2430,7 @@
     },
     "counts": {
       "empty": "0 items",
+      "total": "Totaal: {{count}}",
       "accounts_one": "{{count}} rekening",
       "accounts_other": "{{count}} rekeningen",
       "transactions_one": "{{count}} transactie",
@@ -2453,6 +2454,7 @@
     "unknownWorkspace": "Onbekende workspace",
     "running": "Bezig…",
     "emptyStored": "Nog geen opgeslagen back-ups. Maak er nu een of schakel het schema in.",
+    "listError": "Opgeslagen back-ups konden niet worden geladen.",
     "downloadNow": "ZIP downloaden",
     "subtitle": "Exporteer, plan en herstel back-ups van workspaces zonder inlog- of bankgegevens.",
     "restoreMode": {
