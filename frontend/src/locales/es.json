@@ -2458,6 +2458,7 @@
     "restore": "Restore",
     "previewError": "Could not read backup file",
     "configError": "Could not save backup settings",
+    "configLoadError": "No se pudo cargar la configuración de las copias de seguridad.",
     "invalidRetention": "Introduce un número entero positivo.",
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",

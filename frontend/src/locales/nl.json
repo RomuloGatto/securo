@@ -2450,6 +2450,7 @@
     "restore": "Herstellen",
     "previewError": "Kan back-upbestand niet lezen",
     "configError": "Kan back-upinstellingen niet opslaan",
+    "configLoadError": "De back-upinstellingen konden niet worden geladen.",
     "invalidRetention": "Voer een positief geheel getal in.",
     "unknownWorkspace": "Onbekende workspace",
     "running": "Bezig…",

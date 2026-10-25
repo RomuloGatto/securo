@@ -136,7 +136,7 @@ export default function BackupPage() {
   const { t } = useTranslation()
   const dateLocale = useDateLocale()
   const queryClient = useQueryClient()
-  const { refresh: refreshWorkspaces } = useWorkspace()
+  const { current, refresh: refreshWorkspaces } = useWorkspace()
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   const [runContent, setRunContent] = useState<BackupContent>('both')
@@ -158,14 +158,16 @@ export default function BackupPage() {
   const [storedConfirmation, setStoredConfirmation] = useState('')
 
   const configQuery = useQuery({
-    queryKey: ['backup-config'],
+    queryKey: ['backup-config', current?.id],
     queryFn: backupApi.getConfig,
   })
 
   const backupsQuery = useQuery({
-    queryKey: ['backups'],
+    queryKey: ['backups', current?.id],
     queryFn: backupApi.list,
   })
+
+  const configReady = Boolean(configQuery.data && hydratedConfig === configQuery.data)
 
   useEffect(() => {
     const cfg = configQuery.data
@@ -181,8 +183,8 @@ export default function BackupPage() {
   }, [configQuery.data])
 
   const invalidateBackups = () => {
-    void queryClient.invalidateQueries({ queryKey: ['backups'] })
-    void queryClient.invalidateQueries({ queryKey: ['backup-config'] })
+    void queryClient.invalidateQueries({ queryKey: ['backups', current?.id] })
+    void queryClient.invalidateQueries({ queryKey: ['backup-config', current?.id] })
   }
 
   const saveConfigMutation = useMutation({
@@ -434,17 +436,30 @@ export default function BackupPage() {
             <Switch
               checked={scheduledEnabled}
               onCheckedChange={setScheduledEnabled}
-              disabled={configQuery.data?.storage_shared === false}
+              disabled={!configReady || configQuery.data?.storage_shared === false}
               aria-labelledby="backup-schedule-title"
               className="shrink-0"
             />
           </div>
         </CardHeader>
         <CardContent className="space-y-3 px-4 pb-4">
+          {configQuery.isLoading ? (
+            <div className="rounded-lg border border-dashed bg-muted/10 px-3 py-2 text-sm text-muted-foreground">
+              {t('common.loading')}
+            </div>
+          ) : configQuery.isError ? (
+            <div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+              <span>{t('backup.configLoadError')}</span>
+              <Button variant="outline" size="sm" onClick={() => configQuery.refetch()}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {t('common.retry')}
+              </Button>
+            </div>
+          ) : null}
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-[9rem_minmax(14rem,18rem)_7rem_9rem] xl:justify-start">
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.scheduleLabel')}</Label>
-              <Select value={schedule} onValueChange={(value) => setSchedule(value as 'daily' | 'weekly')}>
+              <Select disabled={!configReady} value={schedule} onValueChange={(value) => setSchedule(value as 'daily' | 'weekly')}>
                 <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="daily">{t('backup.daily')}</SelectItem>
@@ -454,7 +469,7 @@ export default function BackupPage() {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.contentLabel')}</Label>
-              <Select value={configContent} onValueChange={(value) => setConfigContent(value as BackupContent)}>
+              <Select disabled={!configReady} value={configContent} onValueChange={(value) => setConfigContent(value as BackupContent)}>
                 <SelectTrigger className="h-9 w-full text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {CONTENT_OPTIONS.map((content) => (
@@ -465,11 +480,11 @@ export default function BackupPage() {
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.retentionCount')}</Label>
-              <Input className="h-9 text-sm" value={retentionCount} onChange={(e) => setRetentionCount(e.target.value)} type="number" min={1} max={200} step={1} inputMode="numeric" />
+              <Input disabled={!configReady} className="h-9 text-sm" value={retentionCount} onChange={(e) => setRetentionCount(e.target.value)} type="number" min={1} max={200} step={1} inputMode="numeric" />
             </div>
             <div className="grid gap-1.5">
               <Label className="text-xs font-medium text-muted-foreground">{t('backup.retentionDays')}</Label>
-              <Input className="h-9 text-sm" value={retentionDays} onChange={(e) => setRetentionDays(e.target.value)} type="number" min={1} max={3650} step={1} inputMode="numeric" placeholder={t('backup.optional')} />
+              <Input disabled={!configReady} className="h-9 text-sm" value={retentionDays} onChange={(e) => setRetentionDays(e.target.value)} type="number" min={1} max={3650} step={1} inputMode="numeric" placeholder={t('backup.optional')} />
             </div>
           </div>
           <div className="flex flex-col gap-3 rounded-lg border bg-muted/20 px-3 py-2.5 text-xs sm:flex-row sm:items-center sm:justify-between">
@@ -484,8 +499,7 @@ export default function BackupPage() {
               onClick={() => saveConfigMutation.mutate()}
               disabled={
                 saveConfigMutation.isPending ||
-                !configQuery.data ||
-                hydratedConfig !== configQuery.data
+                !configReady
               }
             >
               <Save className="h-3.5 w-3.5" />

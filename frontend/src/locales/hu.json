@@ -2448,6 +2448,7 @@
     "restore": "Visszaállítás",
     "previewError": "Nem sikerült beolvasni a biztonsági mentés fájlját",
     "configError": "Nem sikerült menteni a biztonsági mentés beállításait",
+    "configLoadError": "Nem sikerült betölteni a biztonsági mentés beállításait.",
     "invalidRetention": "Adjon meg egy pozitív egész számot.",
     "unknownWorkspace": "Ismeretlen munkaterület",
     "running": "Folyamatban…",

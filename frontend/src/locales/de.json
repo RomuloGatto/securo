@@ -2449,6 +2449,7 @@
     "restore": "Restore",
     "previewError": "Could not read backup file",
     "configError": "Could not save backup settings",
+    "configLoadError": "Die Sicherungseinstellungen konnten nicht geladen werden.",
     "invalidRetention": "Geben Sie eine positive ganze Zahl ein.",
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",

@@ -1584,6 +1584,17 @@ async def restore_backup_bytes(
                                 continue
                             backup_path = f"invoice_logos/{logo_id}.png"
                             if backup_path not in zf.namelist():
+                                if mode == BackupRestoreMode.current_workspace:
+                                    existing_key = invoice_logo_service.storage_key(
+                                        target_workspace.id, uuid.UUID(logo_id)
+                                    )
+                                    try:
+                                        await storage.download(existing_key)
+                                    except FileNotFoundError:
+                                        pass
+                                    else:
+                                        uploaded_logo_ids.add(logo_id)
+                                        continue
                                 warnings.append(
                                     "Invoice logo skipped because backup data is "
                                     f"missing: {logo_id}"

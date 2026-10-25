@@ -2448,6 +2448,7 @@
     "restore": "復元",
     "previewError": "バックアップファイルを読み込めませんでした",
     "configError": "バックアップ設定を保存できませんでした",
+    "configLoadError": "バックアップ設定を読み込めませんでした。",
     "invalidRetention": "正の整数を入力してください。",
     "unknownWorkspace": "不明なワークスペース",
     "running": "実行中…",

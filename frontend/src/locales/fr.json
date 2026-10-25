@@ -2462,6 +2462,7 @@
     "noBackupSelected": "Choose a stored backup first.",
     "configSaved": "Backup settings saved",
     "configError": "Could not save backup settings",
+    "configLoadError": "Impossible de charger les paramètres de sauvegarde.",
     "invalidRetention": "Saisissez un nombre entier positif.",
     "runSuccess": "Backup created",
     "runError": "Could not create backup",

@@ -1,4 +1,5 @@
 import { act, screen, waitFor } from '@testing-library/react'
+import { toast } from 'sonner'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import BackupPage from '@/pages/backups'
@@ -22,7 +23,10 @@ vi.mock('@/lib/api', () => ({
 }))
 
 vi.mock('@/contexts/workspace-context', () => ({
-  useWorkspace: () => ({ refresh: vi.fn().mockResolvedValue(undefined) }),
+  useWorkspace: () => ({
+    current: { id: 'workspace-1' },
+    refresh: vi.fn().mockResolvedValue(undefined),
+  }),
 }))
 
 vi.mock('@/hooks/use-display-locale', () => ({
@@ -77,13 +81,28 @@ describe('BackupPage', () => {
   it('keeps Save disabled until the fetched configuration hydrates the form', async () => {
     const configRequest = deferred<BackupConfig>()
     api.getConfig.mockReturnValue(configRequest.promise)
-    renderWithProviders(<BackupPage />)
+    const { queryClient } = renderWithProviders(<BackupPage />)
 
     const save = screen.getByRole('button', { name: t('common.save') })
+    const scheduleSwitch = screen.getByRole('switch', { name: t('backup.scheduleTitle') })
     expect(save).toBeDisabled()
+    expect(scheduleSwitch).toBeDisabled()
+    expect(queryClient.getQueryState(['backup-config', 'workspace-1'])).toBeDefined()
+    expect(queryClient.getQueryState(['backups', 'workspace-1'])).toBeDefined()
 
     await act(async () => configRequest.resolve(config))
     await waitFor(() => expect(save).toBeEnabled())
+    expect(scheduleSwitch).toBeEnabled()
+  })
+
+  it('shows a retryable error and disables scheduling when configuration loading fails', async () => {
+    api.getConfig.mockRejectedValue(new Error('network unavailable'))
+    const { user } = renderWithProviders(<BackupPage />)
+
+    expect(await screen.findByText(t('backup.configLoadError'))).toBeInTheDocument()
+    expect(screen.getByRole('switch', { name: t('backup.scheduleTitle') })).toBeDisabled()
+    await user.click(screen.getAllByRole('button', { name: t('common.retry') })[0])
+    await waitFor(() => expect(api.getConfig).toHaveBeenCalledTimes(2))
   })
 
   it('keeps unsaved edits when an identical config refetch completes', async () => {
@@ -134,6 +153,7 @@ describe('BackupPage', () => {
 
     const restoreButton = screen.getByRole('button', { name: t('backup.restore') })
     await waitFor(() => expect(api.previewUpload).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(toast.error).toHaveBeenCalled())
     expect(restoreButton).toBeDisabled()
   })
 

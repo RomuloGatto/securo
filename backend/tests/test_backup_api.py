@@ -1186,6 +1186,30 @@ async def test_backup_round_trip_invoices_products_and_files(
     assert missing_logo_invoice.snapshot["issuer"]["logo_id"] is None
     assert any("Invoice logo skipped" in warning for warning in missing_logo_result.warnings)
 
+    current_result = await backup_service.restore_backup_bytes(
+        session,
+        data=without_logo.getvalue(),
+        target_user_id=test_user.id,
+        current_workspace=test_workspace,
+        content=backup_service.BackupContent.both,
+        mode=backup_service.BackupRestoreMode.current_workspace,
+        confirmation="RESTORE",
+    )
+    current_settings = (
+        await session.execute(
+            select(InvoiceSettings).where(InvoiceSettings.workspace_id == test_workspace.id)
+        )
+    ).scalar_one()
+    current_invoice = (
+        await session.execute(select(Invoice).where(Invoice.workspace_id == test_workspace.id))
+    ).scalar_one()
+    assert current_settings is not None
+    assert current_settings.logo_id == logo_id
+    assert current_invoice.snapshot is not None
+    assert current_invoice.snapshot["issuer"]["logo_id"] == str(logo_id)
+    assert await invoice_logo_service.read(test_workspace.id, logo_id) == logo_data
+    assert not any("Invoice logo skipped" in warning for warning in current_result.warnings)
+
 
 @pytest.mark.asyncio
 async def test_current_restore_preserves_workspace_member_attribution(

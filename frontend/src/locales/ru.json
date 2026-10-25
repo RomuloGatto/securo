@@ -2477,6 +2477,7 @@
     "restore": "Restore",
     "previewError": "Could not read backup file",
     "configError": "Could not save backup settings",
+    "configLoadError": "Не удалось загрузить настройки резервного копирования.",
     "invalidRetention": "Введите положительное целое число.",
     "unknownWorkspace": "Unknown workspace",
     "running": "Running…",
